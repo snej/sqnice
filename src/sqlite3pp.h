@@ -75,7 +75,21 @@ namespace sqlite3pp
     noncopyable& operator=(noncopyable const&) = delete;
   };
 
-  class database : noncopyable
+  class checking
+  {
+  public:
+    void exceptions(bool x)     {exceptions_ = x;}
+    bool exceptions()           {return exceptions_;}
+  protected:
+    checking(database &db)      :db_(db) { }
+    int check(int rc) const     {if (rc != SQLITE_OK && exceptions_) throw_(rc); return rc;}
+    [[noreturn]] void throw_(int rc) const;
+
+    database& db_;
+    bool exceptions_ = false;
+  };
+
+  class database : public checking, noncopyable
   {
     friend class statement;
     friend class database_error;
@@ -147,38 +161,71 @@ namespace sqlite3pp
   class database_error : public std::runtime_error
   {
    public:
-    explicit database_error(char const* msg);
-    explicit database_error(database& db);
+    explicit database_error(char const* msg, int rc);
+    explicit database_error(database& db, int rc);
+
+    int const error_code;
   };
 
   enum copy_semantic { copy, nocopy };
 
-  class statement : noncopyable
+  struct blob
+  {
+    const void* data;
+    size_t size;
+    copy_semantic fcopy;
+  };
+
+  class statement : public checking, noncopyable
   {
    public:
     int prepare(char const* stmt);
     int finish();
+    bool prepared() const;
+    operator bool() const;
 
     int bind(int idx, int value);
     int bind(int idx, double value);
     int bind(int idx, long long int value);
-    int bind(int idx, char const* value, copy_semantic fcopy);
-    int bind(int idx, void const* value, int n, copy_semantic fcopy);
-    int bind(int idx, std::string const& value, copy_semantic fcopy);
+    int bind(int idx, char const* value, copy_semantic fcopy = copy);
+    int bind(int idx, blob value);
+    int bind(int idx, void const* value, int n, copy_semantic fcopy = copy);
+    int bind(int idx, std::string const& value, copy_semantic fcopy = copy);
     int bind(int idx);
     int bind(int idx, null_type);
 
     int bind(char const* name, int value);
     int bind(char const* name, double value);
     int bind(char const* name, long long int value);
-    int bind(char const* name, char const* value, copy_semantic fcopy);
-    int bind(char const* name, void const* value, int n, copy_semantic fcopy);
-    int bind(char const* name, std::string const& value, copy_semantic fcopy);
+    int bind(char const* name, char const* value, copy_semantic fcopy = copy);
+    int bind(char const* name, blob value);
+    int bind(char const* name, void const* value, int n, copy_semantic fcopy = copy);
+    int bind(char const* name, std::string const& value, copy_semantic fcopy = copy);
     int bind(char const* name);
     int bind(char const* name, null_type);
 
+    class bindref : noncopyable { // used by operator[]
+    public:
+      bindref(statement &stmt, int idx) :stmt_(stmt), idx_(idx) { }
+
+      template <class T>
+      void operator= (const T &value) {
+        auto rc = stmt_.bind(idx_, value);
+        if (rc != SQLITE_OK) {
+          throw database_error(stmt_.db_, rc);
+        }
+      }
+    private:
+      statement& stmt_;
+      int const idx_;
+    };
+
+    bindref operator[] (int idx)            {return bindref(*this, idx);}
+    bindref operator[] (char const *name);
+
     int step();
     int reset();
+    int unbind();
 
    protected:
     explicit statement(database& db, char const* stmt = nullptr);
@@ -188,7 +235,6 @@ namespace sqlite3pp
     int finish_impl(sqlite3_stmt* stmt);
 
    protected:
-    database& db_;
     sqlite3_stmt* stmt_;
     char const* tail_;
   };
@@ -205,7 +251,7 @@ namespace sqlite3pp
       bindstream& operator << (T value) {
         auto rc = cmd_.bind(idx_, value);
         if (rc != SQLITE_OK) {
-          throw database_error(cmd_.db_);
+          cmd_.throw_(rc);
         }
         ++idx_;
         return *this;
@@ -213,7 +259,7 @@ namespace sqlite3pp
       bindstream& operator << (char const* value) {
         auto rc = cmd_.bind(idx_, value, copy);
         if (rc != SQLITE_OK) {
-          throw database_error(cmd_.db_);
+          cmd_.throw_(rc);
         }
         ++idx_;
         return *this;
@@ -221,7 +267,7 @@ namespace sqlite3pp
       bindstream& operator << (std::string const& value) {
         auto rc = cmd_.bind(idx_, value, copy);
         if (rc != SQLITE_OK) {
-          throw database_error(cmd_.db_);
+          cmd_.throw_(rc);
         }
         ++idx_;
         return *this;
@@ -288,6 +334,7 @@ namespace sqlite3pp
       char const* get(int idx, char const*) const;
       std::string get(int idx, std::string) const;
       void const* get(int idx, void const*) const;
+      blob get(int idx, blob) const;
       null_type get(int idx, null_type) const;
 
      private:
@@ -306,11 +353,13 @@ namespace sqlite3pp
 
       query_iterator& operator++();
 
-      value_type operator*() const;
+      const value_type& operator*() const;
+      const value_type* operator->() const;
 
      private:
       query* cmd_;
       int rc_;
+      rows rows_;
     };
 
     explicit query(database& db, char const* stmt = nullptr);
@@ -326,7 +375,7 @@ namespace sqlite3pp
     iterator end();
   };
 
-  class transaction : noncopyable
+  class transaction : public checking, noncopyable
   {
    public:
     explicit transaction(database& db, bool fcommit = false, bool freserve = false);
@@ -336,7 +385,23 @@ namespace sqlite3pp
     int rollback();
 
    private:
-    database* db_;
+    bool active_;
+    bool fcommit_;
+  };
+
+  class savepoint : public checking, noncopyable
+  {
+  public:
+    explicit savepoint(database& db, bool fcommit = false);
+    ~savepoint();
+
+    int commit();
+    int rollback();
+
+  private:
+    int execute(char const *cmd);
+    
+    bool active_;
     bool fcommit_;
   };
 
