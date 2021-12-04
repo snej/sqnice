@@ -328,7 +328,9 @@ namespace sqlite3pp
 
   int statement::reset()
   {
-    return check(sqlite3_reset(stmt_));
+    // "If the most recent call to sqlite3_step ... indicated an error, then sqlite3_reset
+    // returns an appropriate error code." Since this is not a new error, don't call check().
+    return sqlite3_reset(stmt_);
   }
 
   int statement::unbind()
