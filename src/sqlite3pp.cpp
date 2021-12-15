@@ -631,13 +631,21 @@ namespace sqlite3pp
   }
 
 
-  transaction::transaction(database& db, bool fcommit, bool freserve) : checking(db), active_(true), fcommit_(fcommit)
+  transaction::transaction(database& db, bool fcommit, bool freserve)
+  : checking(db), active_(true), fcommit_(fcommit)
   {
     exceptions(db.exceptions());
     int rc = db_.execute(freserve ? "BEGIN IMMEDIATE" : "BEGIN");
     if (rc != SQLITE_OK)
       throw_(rc);
   }
+
+  transaction::transaction(transaction &&t)
+  : checking(std::move(t)), active_(t.active_), fcommit_(t.fcommit_)
+  {
+    t.active_ = false;
+  }
+
 
   transaction::~transaction()
   {
@@ -663,12 +671,19 @@ namespace sqlite3pp
   }
 
 
-  savepoint::savepoint(database& db, bool fcommit) : checking(db), active_(true), fcommit_(fcommit)
+  savepoint::savepoint(database& db, bool fcommit)
+  : checking(db), active_(true), fcommit_(fcommit)
   {
     exceptions(db.exceptions());
     int rc = execute("SAVEPOINT x");
     if (rc != SQLITE_OK)
       throw_(rc);
+  }
+
+  savepoint::savepoint(savepoint &&s)
+  : checking(std::move(s)), active_(s.active_), fcommit_(s.fcommit_)
+  {
+    s.active_ = false;
   }
 
   savepoint::~savepoint()

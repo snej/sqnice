@@ -383,6 +383,7 @@ namespace sqlite3pp
   {
    public:
     explicit transaction(database& db, bool fcommit = false, bool freserve = false);
+    transaction(transaction&&);
     ~transaction();
 
     int commit();
@@ -397,6 +398,7 @@ namespace sqlite3pp
   {
   public:
     explicit savepoint(database& db, bool fcommit = false);
+    savepoint(savepoint&&);
     ~savepoint();
 
     int commit();
