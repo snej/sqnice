@@ -314,6 +314,10 @@ namespace sqlite3pp
       int data_count() const;
       int column_type(int idx) const;
 
+      bool not_null(int idx) const {
+        return column_type(idx) != SQLITE_NULL;
+      }
+
       int column_bytes(int idx) const;
 
       template <class T> T get(int idx) const {
