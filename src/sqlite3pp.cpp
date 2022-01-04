@@ -369,9 +369,10 @@ namespace sqlite3pp
     return check(bind(idx, blob{value, size_t(n), fcopy}));
   }
 
-  int statement::bind(int idx, std::string const& value, copy_semantic fcopy)
+  int statement::bind(int idx, std::string_view value, copy_semantic fcopy)
   {
-    return check(sqlite3_bind_text(stmt_, idx, value.c_str(), int(value.size()), fcopy == copy ? SQLITE_TRANSIENT : SQLITE_STATIC ));
+    return check(sqlite3_bind_text(stmt_, idx, value.data(), int(value.size()),
+                                   fcopy == copy ? SQLITE_TRANSIENT : SQLITE_STATIC ));
   }
 
   int statement::bind(int idx)
@@ -414,7 +415,7 @@ namespace sqlite3pp
     return bind(idx, value, n, fcopy);
   }
 
-  int statement::bind(char const* name, std::string const& value, copy_semantic fcopy)
+  int statement::bind(char const* name, std::string_view value, copy_semantic fcopy)
   {
     auto idx = sqlite3_bind_parameter_index(stmt_, name);
     return bind(idx, value, fcopy);
@@ -534,7 +535,17 @@ namespace sqlite3pp
   std::string query::rows::get(int idx, std::string) const
   {
     char const* cstr = get(idx, (char const*)0);
-    return cstr ? cstr : "";
+    if (!cstr)
+      return {};
+    return {cstr, size_t(column_bytes(idx))};
+  }
+
+  std::string_view query::rows::get(int idx, std::string_view) const
+  {
+    char const* cstr = get(idx, (char const*)0);
+    if (!cstr)
+      return {};
+    return {cstr, size_t(column_bytes(idx))};
   }
 
   void const* query::rows::get(int idx, void const*) const

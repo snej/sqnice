@@ -34,6 +34,7 @@
 #include <iterator>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
 
 #ifdef SQLITE3PP_LOADABLE_EXTENSION
@@ -190,7 +191,7 @@ namespace sqlite3pp
     int bind(int idx, char const* value, copy_semantic fcopy = copy);
     int bind(int idx, blob value);
     int bind(int idx, void const* value, int n, copy_semantic fcopy = copy);
-    int bind(int idx, std::string const& value, copy_semantic fcopy = copy);
+    int bind(int idx, std::string_view value, copy_semantic fcopy = copy);
     int bind(int idx);
     int bind(int idx, null_type);
 
@@ -200,7 +201,7 @@ namespace sqlite3pp
     int bind(char const* name, char const* value, copy_semantic fcopy = copy);
     int bind(char const* name, blob value);
     int bind(char const* name, void const* value, int n, copy_semantic fcopy = copy);
-    int bind(char const* name, std::string const& value, copy_semantic fcopy = copy);
+    int bind(char const* name, std::string_view value, copy_semantic fcopy = copy);
     int bind(char const* name);
     int bind(char const* name, null_type);
 
@@ -264,7 +265,7 @@ namespace sqlite3pp
         ++idx_;
         return *this;
       }
-      bindstream& operator << (std::string const& value) {
+      bindstream& operator << (std::string_view value) {
         auto rc = cmd_.bind(idx_, value, copy);
         if (rc != SQLITE_OK) {
           cmd_.throw_(rc);
@@ -337,6 +338,7 @@ namespace sqlite3pp
       long long int get(int idx, long long int) const;
       char const* get(int idx, char const*) const;
       std::string get(int idx, std::string) const;
+      std::string_view get(int idx, std::string_view) const;
       void const* get(int idx, void const*) const;
       blob get(int idx, blob) const;
       null_type get(int idx, null_type) const;
