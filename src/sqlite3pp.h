@@ -187,6 +187,7 @@ namespace sqlite3pp
 
     int bind(int idx, int value);
     int bind(int idx, double value);
+    int bind(int idx, long int value);
     int bind(int idx, long long int value);
     int bind(int idx, char const* value, copy_semantic fcopy = copy);
     int bind(int idx, blob value);
@@ -197,6 +198,7 @@ namespace sqlite3pp
 
     int bind(char const* name, int value);
     int bind(char const* name, double value);
+    int bind(char const* name, long int value);
     int bind(char const* name, long long int value);
     int bind(char const* name, char const* value, copy_semantic fcopy = copy);
     int bind(char const* name, blob value);
@@ -335,6 +337,7 @@ namespace sqlite3pp
      private:
       int get(int idx, int) const;
       double get(int idx, double) const;
+      long long int get(int idx, long int) const;
       long long int get(int idx, long long int) const;
       char const* get(int idx, char const*) const;
       std::string get(int idx, std::string) const;

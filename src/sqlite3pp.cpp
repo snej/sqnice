@@ -22,10 +22,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include "sqlite3pp.h"
 #include <cstring>
 #include <memory>
-
-#include "sqlite3pp.h"
+#include <assert.h>
 
 namespace sqlite3pp
 {
@@ -348,6 +348,11 @@ namespace sqlite3pp
     return check(sqlite3_bind_double(stmt_, idx, value));
   }
 
+  int statement::bind(int idx, long int value)
+  {
+    return check(sqlite3_bind_int64(stmt_, idx, value));
+  }
+
   int statement::bind(int idx, long long int value)
   {
     return check(sqlite3_bind_int64(stmt_, idx, value));
@@ -392,6 +397,12 @@ namespace sqlite3pp
   }
 
   int statement::bind(char const* name, double value)
+  {
+    auto idx = sqlite3_bind_parameter_index(stmt_, name);
+    return bind(idx, value);
+  }
+
+  int statement::bind(char const* name, long int value)
   {
     auto idx = sqlite3_bind_parameter_index(stmt_, name);
     return bind(idx, value);
@@ -520,6 +531,11 @@ namespace sqlite3pp
   double query::rows::get(int idx, double) const
   {
     return sqlite3_column_double(stmt_, idx);
+  }
+
+  long long int query::rows::get(int idx, long int) const
+  {
+    return sqlite3_column_int64(stmt_, idx);
   }
 
   long long int query::rows::get(int idx, long long int) const
