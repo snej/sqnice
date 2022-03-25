@@ -224,6 +224,10 @@ namespace sqlite3pp
     return sqlite3_changes(db_);
   }
 
+  int64_t database::total_changes() const {
+    return sqlite3_total_changes(db_);
+  }
+
   int database::error_code() const
   {
     return sqlite3_errcode(db_);

@@ -129,6 +129,7 @@ namespace sqlite3pp
     int enable_extended_result_codes(bool enable = true);
 
     int changes() const;
+    int64_t total_changes() const;
 
     int error_code() const;
     int extended_error_code() const;
