@@ -25,10 +25,10 @@
 #ifndef SQLITE3PP_H
 #define SQLITE3PP_H
 
-#define SQLITE3PP_VERSION "1.0.8"
+#define SQLITE3PP_VERSION "1.1.0"
 #define SQLITE3PP_VERSION_MAJOR 1
-#define SQLITE3PP_VERSION_MINOR 0
-#define SQLITE3PP_VERSION_PATCH 8
+#define SQLITE3PP_VERSION_MINOR 1
+#define SQLITE3PP_VERSION_PATCH 0
 
 #include <functional>
 #include <iterator>
@@ -36,6 +36,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <unordered_map>
 
 #ifdef SQLITE3PP_LOADABLE_EXTENSION
 #include <sqlite3ext.h>
@@ -233,14 +234,17 @@ namespace sqlite3pp
 
    protected:
     explicit statement(database& db, char const* stmt = nullptr);
+    statement(statement&&) = default;
     ~statement();
 
+    void share(const statement&);
     int prepare_impl(char const* stmt);
     int finish_impl(sqlite3_stmt* stmt);
 
    protected:
     sqlite3_stmt* stmt_;
     char const* tail_;
+    bool shared_ = false;
   };
 
   class command : public statement
@@ -283,6 +287,12 @@ namespace sqlite3pp
     };
 
     explicit command(database& db, char const* stmt = nullptr);
+
+    command shared_copy() const {
+      command cmd(db_);
+      cmd.share(*this);
+      return cmd;
+    }
 
     bindstream binder(int idx = 1);
 
@@ -378,6 +388,16 @@ namespace sqlite3pp
 
     explicit query(database& db, char const* stmt = nullptr);
 
+    void share(const query &q) {
+      statement::share(q);
+    }
+
+    query shared_copy() const {
+      query q(db_);
+      q.share(*this);
+      return q;
+    }
+
     int column_count() const;
 
     char const* column_name(int idx) const;
@@ -388,6 +408,36 @@ namespace sqlite3pp
     iterator begin();
     iterator end();
   };
+
+  /** A cache of pre-compiled `query` or `command` objects. */
+  template <class STMT>
+  class statement_cache {
+  public:
+    explicit statement_cache(database &db) :db_(db) { }
+
+    STMT compile(const std::string &sql) {
+      const STMT* stmt;
+      if (auto i = _stmts_.find(sql); i != _stmts_.end()) {
+        stmt = &i->second;
+      } else {
+        auto x = _stmts_.emplace(std::piecewise_construct,
+                                std::tuple<std::string>{sql},
+                                std::tuple<database&,const char*>{db_, sql.c_str()});
+        stmt = &x.first->second;
+      }
+      return stmt->shared_copy();
+    }
+
+    STMT operator[] (const std::string &sql)    {return compile(sql);}
+    STMT operator[] (const char *sql)           {return compile(sql);}
+
+  private:
+    database& db_;
+    std::unordered_map<std::string,STMT> _stmts_;
+  };
+
+  using command_cache = statement_cache<command>;
+  using query_cache = statement_cache<query>;
 
   class transaction : public checking, noncopyable
   {

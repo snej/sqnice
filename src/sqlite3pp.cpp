@@ -292,14 +292,26 @@ namespace sqlite3pp
 
   int statement::prepare_impl(char const* stmt)
   {
+    shared_ = false;
     return sqlite3_prepare_v2(db_.db_, stmt, int(std::strlen(stmt)), &stmt_, &tail_);
+  }
+
+  void statement::share(const statement& other) {
+    finish();
+    stmt_ = other.stmt_;
+    shared_ = true;
+    unbind();
   }
 
   int statement::finish()
   {
     auto rc = SQLITE_OK;
     if (stmt_) {
-      rc = finish_impl(stmt_);
+      if (shared_) {
+        reset();
+      } else {
+        rc = finish_impl(stmt_);
+      }
       stmt_ = nullptr;
     }
     tail_ = nullptr;
