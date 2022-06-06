@@ -756,7 +756,7 @@ namespace sqlite3pp
   {
     // Each nested savepoint should have a distinct identifier.
     char buf[32];
-    sprintf(buf, "%s sp_%p", cmd, (void*)this);
+    snprintf(buf, sizeof(buf), "%s sp_%p", cmd, (void*)this);
     return check(db_.execute(buf));
   }
 
