@@ -769,4 +769,29 @@ namespace sqlite3pp
   {
   }
 
+
+  blob_handle::blob_handle(database& db,
+                           const char *database,
+                           const char* table, const char *column, int64_t rowid,
+                           bool writeable)
+  {
+    int rc = sqlite3_blob_open(db.db_, database, table, column, rowid, writeable, &blob_);
+    if (rc != SQLITE_OK)
+      throw database_error(db, rc);
+    size_ = sqlite3_blob_bytes(blob_);
+  }
+
+  ssize_t blob_handle::read(void *dst, size_t len, uint64_t offset) {
+    if (offset + len > size_) {
+      if (offset >= size_)
+        return -1;
+      len = size_ - offset;
+    }
+    if (sqlite3_blob_read(blob_, dst, int(len), int(offset)) != SQLITE_OK) {
+      return -1;
+    }
+    return len;
+  }
+
+
 } // namespace sqlite3pp

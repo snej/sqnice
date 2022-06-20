@@ -95,6 +95,7 @@ namespace sqlite3pp
   {
     friend class statement;
     friend class database_error;
+    friend class blob_handle;
     friend class ext::function;
     friend class ext::aggregate;
     friend database ext::borrow(sqlite3* pdb);
@@ -469,6 +470,22 @@ namespace sqlite3pp
     
     bool active_;
     bool fcommit_;
+  };
+
+  /** Random access to the data in a blob. */
+  class blob_handle : public noncopyable {
+  public:
+    blob_handle(database& db,
+                const char *database,
+                const char* table, const char *column, int64_t rowid,
+                bool writeable);
+    ~blob_handle()                      {if (blob_) sqlite3_blob_close(blob_);}
+    uint64_t size() const               {return size_;}
+    ssize_t read(void *dst, size_t len, uint64_t offset);
+
+  private:
+    sqlite3_blob*   blob_ = nullptr;
+    uint64_t        size_;
   };
 
 } // namespace sqlite3pp
