@@ -148,6 +148,8 @@ namespace sqlite3pp
     void set_update_handler(update_handler h);
     void set_authorize_handler(authorize_handler h);
 
+    sqlite3* handle() const         {return db_;}
+    
    private:
     database(sqlite3* pdb);
 
@@ -418,10 +420,10 @@ namespace sqlite3pp
 
     STMT compile(const std::string &sql) {
       const STMT* stmt;
-      if (auto i = _stmts_.find(sql); i != _stmts_.end()) {
+      if (auto i = stmts_.find(sql); i != stmts_.end()) {
         stmt = &i->second;
       } else {
-        auto x = _stmts_.emplace(std::piecewise_construct,
+        auto x = stmts_.emplace(std::piecewise_construct,
                                 std::tuple<std::string>{sql},
                                 std::tuple<database&,const char*>{db_, sql.c_str()});
         stmt = &x.first->second;
@@ -432,9 +434,11 @@ namespace sqlite3pp
     STMT operator[] (const std::string &sql)    {return compile(sql);}
     STMT operator[] (const char *sql)           {return compile(sql);}
 
+    void clear()                                {stmts_.clear();}
+
   private:
     database& db_;
-    std::unordered_map<std::string,STMT> _stmts_;
+    std::unordered_map<std::string,STMT> stmts_;
   };
 
   using command_cache = statement_cache<command>;
