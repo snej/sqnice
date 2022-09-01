@@ -115,6 +115,10 @@ namespace sqlite3pp
     }
   }
 
+  const char* database::filename() const {
+    return sqlite3_db_filename(db_, nullptr);
+  }
+
   int database::connect(char const* dbname, int flags, char const* vfs)
   {
     if (!borrowing_) {

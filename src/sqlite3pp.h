@@ -115,6 +115,8 @@ namespace sqlite3pp
 
     ~database();
 
+    const char* filename() const;
+
     int connect(char const* dbname, int flags, const char* vfs = nullptr);
     int disconnect();
 
