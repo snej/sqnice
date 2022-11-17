@@ -74,8 +74,16 @@ namespace sqlite3pp
   {
     if (dbname) {
       auto rc = connect(dbname, flags, vfs);
-      if (rc != SQLITE_OK)
-        throw database_error("can't connect database", rc);
+      if (rc != SQLITE_OK) {
+        std::string message;
+        if (db_) {
+          message = sqlite3_errmsg(db_);
+          sqlite3_close_v2(db_);
+        } else {
+          message = "can't open database";
+        }
+        throw database_error(message.c_str(), rc);
+      }
     }
   }
 
