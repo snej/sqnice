@@ -1,9 +1,10 @@
+#include "test.h"
 #include <iostream>
 #include "sqlite3pp.h"
 
 using namespace std;
 
-int main()
+int main_insert()
 {
   try {
     sqlite3pp::database db("test.db");
@@ -43,5 +44,6 @@ int main()
   catch (exception& ex) {
     cout << ex.what() << endl;
   }
+    return 0;
 
 }

@@ -1,6 +1,4 @@
-// $ g++ testdb.cpp -I ../headeronly_src -lsqlite3 --std=c++11
-// $ g++ testdb.cpp -I ../headeronly_src -lsqlite3 --std=c++17
-
+#include "test.h"
 #include <iostream>
 #include "sqlite3pp.h"
 #include "sqlite3ppext.h"
@@ -306,6 +304,18 @@ int main()
   test_aggregate();
   test_invalid_path();
   test_reset();
+
+  main_aggregate();
+  main_attach();
+  main_backup();
+  main_callback();
+  main_disconnect();
+  main_function();
+  main_insert();
+  main_insertall();
+  main_select();
+
+  return 0;
 }
 
 sqlite3pp::database contacts_db() {

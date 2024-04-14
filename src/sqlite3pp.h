@@ -310,7 +310,7 @@ namespace sqlite3pp
     bindstream binder(int idx = 1);
 
     int execute();
-    int execute_all();
+    [[deprecated]] int execute_all();
   };
 
   class query : public statement
@@ -322,7 +322,7 @@ namespace sqlite3pp
       class getstream
       {
        public:
-        getstream(rows* rws, int idx);
+        getstream(rows const* rws, int idx);
 
         template <class T>
         getstream& operator >> (T& value) {
@@ -332,7 +332,7 @@ namespace sqlite3pp
         }
 
        private:
-        rows* rws_;
+        rows const* rws_;
         int idx_;
       };
 
@@ -356,7 +356,7 @@ namespace sqlite3pp
         return std::make_tuple(get(idxs, Ts())...);
       }
 
-      getstream getter(int idx = 0);
+      getstream getter(int idx = 0) const;
 
      private:
       int get(int idx, int) const;

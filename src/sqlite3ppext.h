@@ -103,7 +103,7 @@ namespace sqlite3pp
       void result_error(char const* msg);
 
       void* aggregate_data(int size);
-      int aggregate_count();
+      [[deprecated]] int aggregate_count();
 
       template <class... Ts>
       std::tuple<Ts...> to_tuple() {

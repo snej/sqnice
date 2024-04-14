@@ -1,3 +1,4 @@
+#include "test.h"
 #include <exception>
 #include <functional>
 #include <iostream>
@@ -28,7 +29,7 @@ struct rollback_handler
   }
 };
 
-int main()
+int main_callback()
 {
   try {
     sqlite3pp::database db("test.db");
@@ -77,5 +78,6 @@ int main()
   catch (std::exception& ex) {
     cout << ex.what() << endl;
   }
+    return 0;
 
 }

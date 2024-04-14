@@ -1,3 +1,4 @@
+#include "test.h"
 #include <string>
 #include <iostream>
 #include "sqlite3pp.h"
@@ -83,7 +84,7 @@ struct plussum
   int n_;
 };
 
-int main()
+int main_aggregate()
 {
   try {
     sqlite3pp::database db("foods.db");
@@ -115,4 +116,5 @@ int main()
   catch (exception& ex) {
     cout << ex.what() << endl;
   }
+  return 0;
 }

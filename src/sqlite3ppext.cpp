@@ -170,13 +170,11 @@ namespace sqlite3pp
       return sqlite3_aggregate_context(ctx_, size);
     }
 
-#if 0 // Disabled due to deprecation in SQLite --snej
     int context::aggregate_count()
     {
       // FIXME: sqlite3_aggregate_count is deprecated
       return sqlite3_aggregate_count(ctx_);
     }
-#endif
 
     function::function(database& db) : db_(db.db_)
     {

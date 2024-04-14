@@ -500,7 +500,6 @@ namespace sqlite3pp
     return check(rc);
   }
 
-#if 0 // Disabled due to deprecation in SQLite --snej
   int command::execute_all()
   {
     auto rc = execute();
@@ -525,10 +524,9 @@ namespace sqlite3pp
 
     return check(rc);
   }
-#endif
 
 
-  query::rows::getstream::getstream(rows* rws, int idx) : rws_(rws), idx_(idx)
+  query::rows::getstream::getstream(rows const* rws, int idx) : rws_(rws), idx_(idx)
   {
   }
 
@@ -610,7 +608,7 @@ namespace sqlite3pp
     return ignore;
   }
 
-  query::rows::getstream query::rows::getter(int idx)
+  query::rows::getstream query::rows::getter(int idx) const
   {
     return getstream(this, idx);
   }

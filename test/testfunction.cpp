@@ -1,3 +1,4 @@
+#include "test.h"
 #include <string>
 #include <iostream>
 #include "sqlite3pp.h"
@@ -36,7 +37,7 @@ std::string test6(std::string const& s1, std::string const& s2, std::string cons
   return s1 + s2 + s3;
 }
 
-int main()
+int main_function()
 {
   try {
     sqlite3pp::database db("test.db");
@@ -68,4 +69,5 @@ int main()
   catch (exception& ex) {
     cout << ex.what() << endl;
   }
+    return 0;
 }
