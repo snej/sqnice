@@ -235,7 +235,7 @@ namespace sqlite3pp
 
     int step();
     int reset();
-    int unbind();
+    int clear_bindings();
 
    protected:
     explicit statement(database& db, char const* stmt = nullptr);
@@ -279,6 +279,14 @@ namespace sqlite3pp
       }
       bindstream& operator << (std::string_view value) {
         auto rc = cmd_.bind(idx_, value, copy);
+        if (rc != SQLITE_OK) {
+          cmd_.throw_(rc);
+        }
+        ++idx_;
+        return *this;
+      }
+      bindstream& operator << (std::nullptr_t value) {
+        auto rc = cmd_.bind(idx_);
         if (rc != SQLITE_OK) {
           cmd_.throw_(rc);
         }
@@ -368,11 +376,11 @@ namespace sqlite3pp
 
     class query_iterator    {
      public:
-      typedef rows        value_type;
-      typedef ptrdiff_t  difference_type;
-      typedef rows*   pointer;
+      typedef std::input_iterator_tag iterator_category;
+      typedef rows value_type;
+      typedef std::ptrdiff_t difference_type;
+      typedef rows* pointer;
       typedef rows& reference;
-      typedef std::input_iterator_tag  iterator_category;
 
       query_iterator();
       explicit query_iterator(query* cmd);

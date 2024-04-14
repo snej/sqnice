@@ -312,7 +312,7 @@ namespace sqlite3pp
     finish();
     stmt_ = other.stmt_;
     shared_ = true;
-    unbind();
+    clear_bindings();
   }
 
   int statement::finish()
@@ -361,7 +361,7 @@ namespace sqlite3pp
     return sqlite3_reset(stmt_);
   }
 
-  int statement::unbind()
+  int statement::clear_bindings()
   {
     return check(sqlite3_clear_bindings(stmt_));
   }
