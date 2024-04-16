@@ -488,14 +488,6 @@ namespace sqlite3pp {
         return iterator(this);
     }
 
-    std::optional<query::row> query::single_row() {
-        switch (status rc = step()) {
-            case status::row:   return row(stmt_);
-            case status::done:  return std::nullopt;
-            default:            throw_(rc);
-        }
-    }
-
 
 #pragma mark - QUERY ROW:
 
@@ -520,20 +512,16 @@ namespace sqlite3pp {
         return sqlite3_column_bytes(stmt_, idx);
     }
 
-    int query::row::get(int idx, int) const {
+    int query::row::get_int(int idx) const {
         return sqlite3_column_int(stmt_, idx);
+    }
+
+    long long int query::row::get_int64(int idx) const {
+        return sqlite3_column_int64(stmt_, idx);
     }
 
     double query::row::get(int idx, double) const {
         return sqlite3_column_double(stmt_, idx);
-    }
-
-    long long int query::row::get(int idx, long int) const {
-        return sqlite3_column_int64(stmt_, idx);
-    }
-
-    long long int query::row::get(int idx, long long int) const {
-        return sqlite3_column_int64(stmt_, idx);
     }
 
     char const* query::row::get(int idx, char const*) const {
