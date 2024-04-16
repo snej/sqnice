@@ -22,16 +22,18 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#pragma once
 #ifndef SQLITE3PP_H
 #define SQLITE3PP_H
 
-#define SQLITE3PP_VERSION "1.1.0"
-#define SQLITE3PP_VERSION_MAJOR 1
-#define SQLITE3PP_VERSION_MINOR 1
+#define SQLITE3PP_VERSION "2.0.0"
+#define SQLITE3PP_VERSION_MAJOR 2
+#define SQLITE3PP_VERSION_MINOR 0
 #define SQLITE3PP_VERSION_PATCH 0
 
 #include <functional>
-#include <iterator>
+#include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -39,468 +41,659 @@
 #include <unordered_map>
 
 #ifdef SQLITE3PP_LOADABLE_EXTENSION
-#include <sqlite3ext.h>
-SQLITE_EXTENSION_INIT1
+#  include <sqlite3ext.h>
+    SQLITE_EXTENSION_INIT1
 #else
 #  include <sqlite3.h>
 #endif
 
-namespace sqlite3pp
-{
-  class database;
 
-  namespace ext
-  {
-    class function;
-    class aggregate;
-    database borrow(sqlite3* pdb);
-  }
-
-  template <class T>
-  struct convert {
-    using to_int = int;
-  };
-
-  class null_type {};
-  extern null_type ignore;
-
-  class noncopyable
-  {
-   protected:
-    noncopyable() = default;
-    ~noncopyable() = default;
-
-    noncopyable(noncopyable&&) = default;
-    noncopyable& operator=(noncopyable&&) = default;
-
-    noncopyable(noncopyable const&) = delete;
-    noncopyable& operator=(noncopyable const&) = delete;
-  };
-
-  class checking
-  {
-  public:
-    void exceptions(bool x)     {exceptions_ = x;}
-    bool exceptions()           {return exceptions_;}
-  protected:
-    checking(database &db)      :db_(db) { }
-    int check(int rc) const     {if (rc != SQLITE_OK && exceptions_) throw_(rc); return rc;}
-    [[noreturn]] void throw_(int rc) const;
-
-    database& db_;
-    bool exceptions_ = false;
-  };
-
-  class database : public checking, noncopyable
-  {
-    friend class statement;
-    friend class database_error;
-    friend class blob_handle;
-    friend class ext::function;
-    friend class ext::aggregate;
-    friend database ext::borrow(sqlite3* pdb);
-
-   public:
-    using busy_handler = std::function<int (int)>;
-    using commit_handler = std::function<int ()>;
-    using rollback_handler = std::function<void ()>;
-    using update_handler = std::function<void (int, char const*, char const*, long long int)>;
-    using authorize_handler = std::function<int (int, char const*, char const*, char const*, char const*)>;
-    using backup_handler = std::function<void (int, int, int)>;
-
-    explicit database(char const* dbname = nullptr, int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, const char* vfs = nullptr);
-
-    database(database&& db);
-    database& operator=(database&& db);
-
-    ~database();
-
-    const char* filename() const;
-
-    int connect(char const* dbname, int flags, const char* vfs = nullptr);
-    int disconnect();
-
-    int attach(char const* dbname, char const* name);
-    int detach(char const* name);
-
-    int backup(database& destdb, backup_handler h = {});
-    int backup(char const* dbname, database& destdb, char const* destdbname, backup_handler h, int step_page = 5);
-
-    long long int last_insert_rowid() const;
-
-    int enable_foreign_keys(bool enable = true);
-    int enable_triggers(bool enable = true);
-    int enable_extended_result_codes(bool enable = true);
-
-    int changes() const;
-    int64_t total_changes() const;
-
-    int error_code() const;
-    int extended_error_code() const;
-    char const* error_msg() const;
-
-    int execute(char const* sql);
-    int executef(char const* sql, ...);
-
-    int set_busy_timeout(int ms);
-
-    void set_busy_handler(busy_handler h);
-    void set_commit_handler(commit_handler h);
-    void set_rollback_handler(rollback_handler h);
-    void set_update_handler(update_handler h);
-    void set_authorize_handler(authorize_handler h);
-
-    sqlite3* handle() const         {return db_;}
+namespace sqlite3pp {
     
-   private:
-    database(sqlite3* pdb);
+    class database;
 
-   private:
-    sqlite3* db_;
-    bool borrowing_;
-
-    busy_handler bh_;
-    commit_handler ch_;
-    rollback_handler rh_;
-    update_handler uh_;
-    authorize_handler ah_;
-  };
-
-  class database_error : public std::runtime_error
-  {
-   public:
-    explicit database_error(char const* msg, int rc);
-    explicit database_error(database& db, int rc);
-
-    int const error_code;
-  };
-
-  enum copy_semantic { copy, nocopy };
-
-  struct blob
-  {
-    const void* data;
-    size_t size;
-    copy_semantic fcopy;
-  };
-
-  class statement : public checking, noncopyable
-  {
-   public:
-    int prepare(char const* stmt);
-    int finish();
-    bool prepared() const;
-    operator bool() const;
-
-    int bind(int idx, int value);
-    int bind(int idx, double value);
-    int bind(int idx, long int value);
-    int bind(int idx, long long int value);
-    int bind(int idx, char const* value, copy_semantic fcopy = copy);
-    int bind(int idx, blob value);
-    int bind(int idx, void const* value, int n, copy_semantic fcopy = copy);
-    int bind(int idx, std::string_view value, copy_semantic fcopy = copy);
-    int bind(int idx);
-    int bind(int idx, null_type);
-
-    int bind(char const* name, int value);
-    int bind(char const* name, double value);
-    int bind(char const* name, long int value);
-    int bind(char const* name, long long int value);
-    int bind(char const* name, char const* value, copy_semantic fcopy = copy);
-    int bind(char const* name, blob value);
-    int bind(char const* name, void const* value, int n, copy_semantic fcopy = copy);
-    int bind(char const* name, std::string_view value, copy_semantic fcopy = copy);
-    int bind(char const* name);
-    int bind(char const* name, null_type);
-
-    class bindref : noncopyable { // used by operator[]
-    public:
-      bindref(statement &stmt, int idx) :stmt_(stmt), idx_(idx) { }
-
-      template <class T>
-      void operator= (const T &value) {
-        auto rc = stmt_.bind(idx_, value);
-        if (rc != SQLITE_OK) {
-          throw database_error(stmt_.db_, rc);
-        }
-      }
-    private:
-      statement& stmt_;
-      int const idx_;
-    };
-
-    bindref operator[] (int idx)            {return bindref(*this, idx);}
-    bindref operator[] (char const *name);
-
-    int step();
-    int reset();
-    int clear_bindings();
-
-   protected:
-    explicit statement(database& db, char const* stmt = nullptr);
-    statement(statement&&) = default;
-    ~statement();
-
-    void share(const statement&);
-    int prepare_impl(char const* stmt);
-    int finish_impl(sqlite3_stmt* stmt);
-
-   protected:
-    sqlite3_stmt* stmt_;
-    char const* tail_;
-    bool shared_ = false;
-  };
-
-  class command : public statement
-  {
-   public:
-    class bindstream
-    {
-     public:
-      bindstream(command& cmd, int idx);
-
-      template <class T>
-      bindstream& operator << (T value) {
-        auto rc = cmd_.bind(idx_, value);
-        if (rc != SQLITE_OK) {
-          cmd_.throw_(rc);
-        }
-        ++idx_;
-        return *this;
-      }
-      bindstream& operator << (char const* value) {
-        auto rc = cmd_.bind(idx_, value, copy);
-        if (rc != SQLITE_OK) {
-          cmd_.throw_(rc);
-        }
-        ++idx_;
-        return *this;
-      }
-      bindstream& operator << (std::string_view value) {
-        auto rc = cmd_.bind(idx_, value, copy);
-        if (rc != SQLITE_OK) {
-          cmd_.throw_(rc);
-        }
-        ++idx_;
-        return *this;
-      }
-      bindstream& operator << (std::nullptr_t value) {
-        auto rc = cmd_.bind(idx_);
-        if (rc != SQLITE_OK) {
-          cmd_.throw_(rc);
-        }
-        ++idx_;
-        return *this;
-      }
-
-     private:
-      command& cmd_;
-      int idx_;
-    };
-
-    explicit command(database& db, char const* stmt = nullptr);
-
-    command shared_copy() const {
-      command cmd(db_);
-      cmd.share(*this);
-      return cmd;
+    // Defined in sqlite3ppext.hh
+    namespace ext {
+        class function;
+        class aggregate;
+        database borrow(sqlite3*);
     }
 
-    bindstream binder(int idx = 1);
+    /** Classes inheriting from this cannot be copied, but can be moved. */
+    class noncopyable {
+    protected:
+        noncopyable() = default;
+        ~noncopyable() = default;
 
-    int execute();
-    [[deprecated]] int execute_all();
-  };
+        noncopyable(noncopyable&&) = default;
+        noncopyable& operator=(noncopyable&&) = default;
 
-  class query : public statement
-  {
-   public:
-    class rows
-    {
-     public:
-      class getstream
-      {
-       public:
-        getstream(rows const* rws, int idx);
+        noncopyable(noncopyable const&) = delete;
+        noncopyable& operator=(noncopyable const&) = delete;
+    };
+
+    /** A SQLite error code. */
+    enum class status : int {
+        ok          = SQLITE_OK,
+        busy        = SQLITE_BUSY,
+        locked      = SQLITE_LOCKED,
+        constraint  = SQLITE_CONSTRAINT,
+        misuse      = SQLITE_MISUSE,
+        done        = SQLITE_DONE,
+        row         = SQLITE_ROW,
+    };
+
+    /// Masks out other bits set in extended status codes
+    inline status basic_status(status s)                    {return status{int(s) & 0xff};}
+    /// True if a `status` is successful (not an error.)
+    inline bool ok(status s)                                {return s == status::ok;}
+
+    /** Exception class thrown by this API. */
+    class database_error : public std::runtime_error {
+    public:
+        explicit database_error(char const* msg, status rc);
+        explicit database_error(database& db, status rc);
+        explicit database_error(char const* msg, int rc)    :database_error(msg,status{rc}) { }
+        explicit database_error(database& db, int rc)       :database_error(db,status{rc}) { }
+
+        status const error_code;
+    };
+
+
+    /** A base class that handles exceptions by throwing or returning an error code.
+        Most of the other classes derive from this. */
+    class checking {
+    public:
+        /// Enables or disables exceptions. 
+        /// For a `database`, this defaults to false.
+        /// For other objects, it defaults to the value in the `database` they are created from.
+        void exceptions(bool x)     {exceptions_ = x;}
+        /// True if exceptions are enabled.
+        bool exceptions()           {return exceptions_;}
+    protected:
+        checking(database &db, bool x)              :db_(db), exceptions_(x) { }
+        explicit checking(database &db);
+        status check(status rc) const;
+        status check(int rc) const                  {return check(status{rc});}
+        [[noreturn]] void throw_(status rc) const;
+        [[noreturn]] void throw_(int rc) const      {throw_(status{rc});}
+
+        database&   db_;
+        bool        exceptions_ = false;
+    };
+
+
+#pragma mark - DATABASE:
+
+
+    /** A SQLite database connection. */
+    class database : public checking, noncopyable {
+    public:
+        explicit database(char const* dbname = nullptr,
+                          int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+                          const char* vfs = nullptr);
+
+        database(database&& db);
+        database& operator=(database&& db);
+
+        ~database();
+
+        status connect(char const* dbname, int flags, const char* vfs = nullptr);
+        status disconnect();
+
+        status attach(char const* dbname, char const* name);
+        status detach(char const* name);
+
+        const char* filename() const;
+
+        sqlite3* handle() const         {return db_;}
+
+        int64_t last_insert_rowid() const;
+
+        status enable_foreign_keys(bool enable = true);
+        status enable_triggers(bool enable = true);
+        status enable_extended_result_codes(bool enable = true);
+
+        int changes() const;
+        int64_t total_changes() const;
+
+        status error_code() const;
+        status extended_error_code() const;
+        char const* error_msg() const;
+
+        /** Executes a (non-`SELECT`) statement, or multiple statements separated by `;`. */
+        status execute(char const* sql);
+
+        /** Same as `execute` but uses `printf`-style formatting to produce the SQL string.
+            @warning If using `%s`, be **very careful** not to introduce SQL injection attacks! */
+        status executef(char const* sql, ...)
+#ifdef SQLITE3PP_TYPECHECK_EXECUTEF
+                                                __attribute__((__format__ (__printf__, 2, 3)))
+#endif
+        ;
+
+        status set_busy_timeout(int ms);
+
+        using busy_handler = std::function<status (int)>;
+        using commit_handler = std::function<status ()>;
+        using rollback_handler = std::function<void ()>;
+        using update_handler = std::function<void (int, char const*, char const*, long long int)>;
+        using authorize_handler = std::function<status (int, char const*, char const*, char const*, char const*)>;
+
+        void set_busy_handler(busy_handler h);
+        void set_commit_handler(commit_handler h);
+        void set_rollback_handler(rollback_handler h);
+        void set_update_handler(update_handler h);
+        void set_authorize_handler(authorize_handler h);
+
+        using backup_handler = std::function<void (int, int, status)>;
+
+        status backup(database& destdb, backup_handler h = {});
+        status backup(char const* dbname, database& destdb, char const* destdbname, backup_handler h, int step_page = 5);
+
+    private:
+        friend class statement;
+        friend class database_error;
+        friend class blob_handle;
+        friend class ext::function;
+        friend class ext::aggregate;
+        friend database ext::borrow(sqlite3* pdb);
+
+        database(sqlite3* pdb);
+
+    private:
+        sqlite3*            db_;
+        bool                borrowing_;
+        busy_handler        bh_;
+        commit_handler      ch_;
+        rollback_handler    rh_;
+        update_handler      uh_;
+        authorize_handler   ah_;
+    };
+
+
+#pragma mark - STATEMENT:
+
+
+    class null_type {};
+    /** A singleton value representing SQL `NULL`, for use with the `bind` API. */
+    constexpr null_type ignore;
+
+    /** Specifies how string and blob values are bound. `copy` is safer, `nocopy` faster.*/
+    enum copy_semantic { copy, nocopy };
+
+    /** A blob value to bind to a statement parameter. */
+    struct blob {
+        const void* data;
+        size_t size;
+        copy_semantic fcopy;
+    };
+
+
+    /** Abstract base class of `command` and `query`. */
+    class statement : public checking, noncopyable {
+    public:
+        /// Stops the execution of the statement.
+        /// @note  The does not clear bindings.
+        status reset();
+
+        /// Clears all the parameter bindings to `NULL`.
+        status clear_bindings();
+
+        class bindref;
+
+        /// A reference to the `idx`'th parameter; assign a value to bind it.
+        inline bindref operator[] (int idx);
+        /// A reference to a named parameter; assign a value to bind it.
+        bindref operator[] (char const *name);
+
+        class bindstream;
+        /// Returns a sort of output stream, on which each `<<` binds the next numbered parameter.
+        bindstream binder(int idx = 1);
+
+        // The following methods bind values to numbered parameters (`?` params start at 1)
+        status bind(int idx, int value);
+        status bind(int idx, double value);
+        status bind(int idx, long int value);
+        status bind(int idx, long long int value);
+        status bind(int idx, char const* value, copy_semantic = copy);
+        status bind(int idx, blob value);
+        status bind(int idx, std::span<const std::byte> value, copy_semantic = copy);
+        status bind(int idx, std::string_view value, copy_semantic = copy);
+        status bind(int idx);
+        status bind(int idx, null_type)     {return bind(idx);}
+        status bind(int idx, nullptr_t)     {return bind(idx);}
+
+        // The following methods bind values to named parameters.
+        status bind(char const* name, int value);
+        status bind(char const* name, double value);
+        status bind(char const* name, long int value);
+        status bind(char const* name, long long int value);
+        status bind(char const* name, char const* value, copy_semantic = copy);
+        status bind(char const* name, blob value);
+        status bind(char const* name, std::span<const std::byte> value, copy_semantic = copy);
+        status bind(char const* name, std::string_view value, copy_semantic = copy);
+        status bind(char const* name);
+        status bind(char const* name, null_type)     {return bind(name);}
+        status bind(char const* name, nullptr_t)     {return bind(name);}
+
+        /// Can be used to replace the SQL of the statement.
+        status prepare(char const* sql);
+
+        /// Tears down the `sqlite3_stmt`. The statement is no longer prepared and can't be used.
+        status finish();
+
+        /// True if the statement contains SQL and can be executed.
+        bool prepared() const           {return stmt_ != nullptr;}
+        operator bool() const           {return prepared();}
+
+    protected:
+        explicit statement(database& db, char const* stmt = nullptr);
+        statement(statement&&) = default;
+        ~statement();
+
+        void share(const statement&);
+        status prepare_impl(char const* stmt);
+        status finish_impl(sqlite3_stmt* stmt);
+        status step();
+
+    protected:
+        sqlite3_stmt*   stmt_;
+        char const*     tail_;
+        bool            shared_ = false;
+    };
+
+
+    /* A reference to a statement parameter; an implementation detail of statement::operator[]. */
+    class statement::bindref : noncopyable {
+    public:
+        bindref(statement &stmt, int idx) :stmt_(stmt), idx_(idx) { }
+
+        /// Assigning a value to a `bindref` calls `bind` on the `statement`.
+        template <class T>
+        void operator= (const T &value) {
+            if (auto rc = stmt_.bind(idx_, value); rc != status::ok)
+                throw database_error(stmt_.db_, rc);
+        }
+    private:
+        statement&  stmt_;
+        int const   idx_;
+    };
+
+    statement::bindref statement::operator[] (int idx)  {return bindref(*this, idx);}
+
+
+    /** Produced by `statement::binder()`. Binds one statement parameter for each `<<` call.*/
+    class statement::bindstream {
+    public:
+        explicit bindstream(statement& stmt, int idx =1)  :stmt_(stmt), idx_(idx) { }
+
+        template <class T>
+        bindstream& operator << (T&& v)     {stmt_.bind(idx_++, std::forward<T>(v)); return *this;}
+
+    private:
+        statement& stmt_;
+        int idx_;
+    };
+
+
+    /** A SQL statement other than `SELECT`; i.e. `INSERT`, `UPDATE`, `CREATE`... */
+    class command : public statement {
+    public:
+        explicit command(database& db, char const* stmt = nullptr);
+
+        /// Executes the statement.
+        /// @note  To get the rowid of an INSERT, call `database::last_insert_rowid`.
+        /// @note  To get the number of rows changed, call `database::changes()`.
+        status execute();
+
+        /// The last rowid inserted by this command, after executing it.
+        int64_t last_insert_rowid() const   {return db_.last_insert_rowid();}
+
+        /// The number of rows changed by this command, after executing it.
+        int changes() const                 {return db_.changes();}
+
+        /// Creates a new instance that shares the same underlying `sqlite3_stmt`.
+        /// @warning  Do not use the copy after the original `command` is destructed!
+        command shared_copy() const;
+
+        [[deprecated]] status execute_all();
+    };
+
+
+    template <class T>
+    struct convert {
+        using to_int = int;
+    };
+
+
+    /** A `SELECT` statement, whose results can be iterated. */
+    class query : public statement {
+    public:
+        explicit query(database& db, char const* stmt = nullptr);
+
+        /// Creates a new instance that shares the same underlying `sqlite3_stmt`.
+        /// @warning  Do not use the copy after the original `command` is destructed!
+        query shared_copy() const;
+
+        /// The number of columns the query will produce.
+        int column_count() const;
+
+        /// The name of the `idx`'th column.
+        char const* column_name(int idx) const;
+        
+        /// The declared type of the `idx`th column in the table's schema. Not generally useful.
+        char const* column_decltype(int idx) const;
+
+        class row;
+        class iterator;
+
+        /// Runs the query and returns an iterator pointing to the first result row.
+        iterator begin();
+        /// An empty iterator representing the end of the rows.
+        iterator end();
+
+        /// A convenience method that runs the query and returns the value of the first row's
+        /// first column. If there are no rows, returns `std::nullopt`.
+        template <typename T>
+        std::optional<T> execute_single();
+
+        template <typename T>
+        T execute_single_or(T const& defaultResult);
+
+        // This doesn't work because `reset` invalidates the pointers in the `blob`; use string instead
+        template <> std::optional<blob> execute_single() = delete;
+        template <> blob execute_single_or(blob const&) = delete;
+    };
+
+
+    /** Represents the current row of a query being iterated.
+        @note  Columns are numbered from 0. */
+    class query::row {
+    public:
+        /// The number of columns in the row. (Same as `query::column_count`.)
+        int column_count() const;
+
+        /// The SQLite data type of the `idx`th column -- `SQLITE_INTEGER`, `SQLITE_TEXT`, etc.
+        int column_type(int idx) const;
+
+        /// True if the `idx`th column value is not `NULL`.
+        bool not_null(int idx) const                {return column_type(idx) != SQLITE_NULL;}
+
+        /// The length in bytes of a BLOB or a UTF-8 TEXT value.
+        int column_bytes(int idx) const;
+
+        /// Returns the value of the `idx`th column as C++ type `T`.
+        template <class T> T get(int idx) const     {return get(idx, T());}
+
+        template <class... Ts>
+        std::tuple<Ts...> get_columns(typename convert<Ts>::to_int... idxs) const {
+            return std::make_tuple(get(idxs, Ts())...);
+        }
+
+        class getstream;
+        /// Returns a sort of input stream from which columns can be read using `>>`.
+        getstream getter(int idx = 0) const;
+
+    private:
+        friend class query::iterator;
+        explicit row(sqlite3_stmt* stmt);
+
+        int get(int idx, int) const;
+        double get(int idx, double) const;
+        long long int get(int idx, long int) const;
+        long long int get(int idx, long long int) const;
+        char const* get(int idx, char const*) const;
+        std::string get(int idx, std::string) const;
+        std::string_view get(int idx, std::string_view) const;
+        void const* get(int idx, void const*) const;
+        blob get(int idx, blob) const;
+        null_type get(int idx, null_type) const;
+
+    private:
+        sqlite3_stmt* stmt_;
+    };
+
+
+    /** A sort of input stream over a query row's columns. Each `>>` stores the next value. */
+    class query::row::getstream {
+    public:
+        getstream(row const* rws, int idx);
 
         template <class T>
         getstream& operator >> (T& value) {
-          value = rws_->get(idx_, T());
-          ++idx_;
-          return *this;
+            value = rws_->get(idx_++, T());
+            return *this;
         }
 
-       private:
-        rows const* rws_;
-        int idx_;
-      };
-
-      explicit rows(sqlite3_stmt* stmt);
-
-      int data_count() const;
-      int column_type(int idx) const;
-
-      bool not_null(int idx) const {
-        return column_type(idx) != SQLITE_NULL;
-      }
-
-      int column_bytes(int idx) const;
-
-      template <class T> T get(int idx) const {
-        return get(idx, T());
-      }
-
-      template <class... Ts>
-      std::tuple<Ts...> get_columns(typename convert<Ts>::to_int... idxs) const {
-        return std::make_tuple(get(idxs, Ts())...);
-      }
-
-      getstream getter(int idx = 0) const;
-
-     private:
-      int get(int idx, int) const;
-      double get(int idx, double) const;
-      long long int get(int idx, long int) const;
-      long long int get(int idx, long long int) const;
-      char const* get(int idx, char const*) const;
-      std::string get(int idx, std::string) const;
-      std::string_view get(int idx, std::string_view) const;
-      void const* get(int idx, void const*) const;
-      blob get(int idx, blob) const;
-      null_type get(int idx, null_type) const;
-
-     private:
-      sqlite3_stmt* stmt_;
+    private:
+        row const*  rws_;
+        int         idx_;
     };
 
-    class query_iterator    {
-     public:
-      typedef std::input_iterator_tag iterator_category;
-      typedef rows value_type;
-      typedef std::ptrdiff_t difference_type;
-      typedef rows* pointer;
-      typedef rows& reference;
 
-      query_iterator();
-      explicit query_iterator(query* cmd);
+    /** Iterator over a query's result rows. */
+    class query::iterator {
+    public:
+        iterator();
+        explicit iterator(query* cmd);
 
-      bool operator==(query_iterator const&) const;
-      bool operator!=(query_iterator const&) const;
+        bool operator==(iterator const&) const;
+        bool operator!=(iterator const&) const;
 
-      query_iterator& operator++();
+        iterator& operator++();
 
-      const value_type& operator*() const;
-      const value_type* operator->() const;
+        const row& operator*() const;
+        const row* operator->() const;
 
-     private:
-      query* cmd_;
-      int rc_;
-      rows rows_;
+        using iterator_category = std::input_iterator_tag;
+        using value_type = row;
+        using difference_type = std::ptrdiff_t;
+        using pointer = row*;
+        using reference = row&;
+
+    private:
+        query*  cmd_;
+        status  rc_;
+        row     rows_;
     };
 
-    explicit query(database& db, char const* stmt = nullptr);
 
-    void share(const query &q) {
-      statement::share(q);
+    template <typename T>
+    std::optional<T> query::execute_single() {
+        std::optional<T> result;
+        if (auto i = begin(); i != end())
+            result = i->get<T>(0);
+        reset();
+        return result;
     }
 
-    query shared_copy() const {
-      query q(db_);
-      q.share(*this);
-      return q;
+    template <typename T>
+    T query::execute_single_or(T const& defaultResult) {
+        if (auto i = begin(); i != end()) {
+            T result = i->get<T>(0);
+            reset();
+            return result;
+        } else {
+            reset();
+            return defaultResult;
+        }
     }
 
-    int column_count() const;
 
-    char const* column_name(int idx) const;
-    char const* column_decltype(int idx) const;
+#pragma mark - STATEMENT CACHE:
 
-    using iterator = query_iterator;
 
-    iterator begin();
-    iterator end();
-  };
+    /** A cache of pre-compiled `query` or `command` objects. This has three benefits:
+        1. Reusing a compiled statement is faster than compiling a new one.
+        2. If you work around 1 by keeping statement objects around, you have to remember to reset
+           them when done with them, else they hang onto database resources.
+        3. Destructing the cache destructs all the statements automatically.*/
+    template <class STMT>
+    class statement_cache {
+    public:
+        explicit statement_cache(database &db) :db_(db) { }
 
-  /** A cache of pre-compiled `query` or `command` objects. */
-  template <class STMT>
-  class statement_cache {
-  public:
-    explicit statement_cache(database &db) :db_(db) { }
+        /// Compiles a STMT, or returns a copy of an already-compiled one with the same SQL string.
+        /// @warning  If two returned STMTs with the same string are in scope at the same time,
+        ///           they won't work right because they are using the same `sqlite3_stmt`.
+        STMT compile(const std::string &sql) {
+            const STMT* stmt;
+            if (auto i = stmts_.find(sql); i != stmts_.end()) {
+                stmt = &i->second;
+            } else {
+                auto x = stmts_.emplace(std::piecewise_construct,
+                                        std::tuple<std::string>{sql},
+                                        std::tuple<database&,const char*>{db_, sql.c_str()});
+                stmt = &x.first->second;
+            }
+            return stmt->shared_copy();
+        }
 
-    STMT compile(const std::string &sql) {
-      const STMT* stmt;
-      if (auto i = stmts_.find(sql); i != stmts_.end()) {
-        stmt = &i->second;
-      } else {
-        auto x = stmts_.emplace(std::piecewise_construct,
-                                std::tuple<std::string>{sql},
-                                std::tuple<database&,const char*>{db_, sql.c_str()});
-        stmt = &x.first->second;
-      }
-      return stmt->shared_copy();
-    }
+        STMT operator[] (const std::string &sql)    {return compile(sql);}
+        STMT operator[] (const char *sql)           {return compile(sql);}
 
-    STMT operator[] (const std::string &sql)    {return compile(sql);}
-    STMT operator[] (const char *sql)           {return compile(sql);}
+        /// Empties the cache, freeing all statements.
+        void clear()                                {stmts_.clear();}
 
-    void clear()                                {stmts_.clear();}
+    private:
+        database& db_;
+        std::unordered_map<std::string,STMT> stmts_;
+    };
 
-  private:
-    database& db_;
-    std::unordered_map<std::string,STMT> stmts_;
-  };
+    /** A cache of pre-compiled `command` objects. */
+    using command_cache = statement_cache<command>;
 
-  using command_cache = statement_cache<command>;
-  using query_cache = statement_cache<query>;
+    /** A cache of pre-compiled `query` objects. */
+    using query_cache = statement_cache<query>;
 
-  class transaction : public checking, noncopyable
-  {
-   public:
-    explicit transaction(database& db, bool fcommit = false, bool freserve = false);
-    transaction(transaction&&);
-    ~transaction();
 
-    int commit();
-    int rollback();
+#pragma mark - TRANSACTIONS:
 
-   private:
-    bool active_;
-    bool fcommit_;
-  };
 
-  class savepoint : public checking, noncopyable
-  {
-  public:
-    explicit savepoint(database& db, bool fcommit = false);
-    savepoint(savepoint&&);
-    ~savepoint();
+    /** An RAII wrapper around SQLite's `BEGIN` and `COMMIT`/`ROLLBACK` commands.
+        @note  These do not nest! If you need nesting, use `savepoint` instead. */
+    class transaction : public checking, noncopyable {
+    public:
+        /// Begins a transaction.
+        /// @param db  The database.
+        /// @param autocommit  If true, the transaction will automatically commit when
+        ///     the destructor runs. Not recommended because destructors should not throw
+        ///     exceptions, so you won't know if it succeeded or not.
+        /// @param immediate  If true, uses `BEGIN IMMEDIATE`, which immediately grabs
+        ///     the database lock. If false, the first write you make in the transaction
+        ///     will try to grab the lock but will fail if another transaction is active.
+        /// @throws database_error if a transaction is already active.
+        explicit transaction(database& db,
+                             bool autocommit = false,
+                             bool immediate = true);
+        transaction(transaction&&);
+        ~transaction();
 
-    int commit();
-    int rollback();
+        /// Commits the transaction.
+        status commit();
+        /// Rolls back (aborts) the transaction.
+        status rollback();
 
-  private:
-    int execute(char const *cmd);
+    private:
+        bool active_;
+        bool autocommit_;
+    };
+
     
-    bool active_;
-    bool fcommit_;
-  };
+    /** A savepoint is like a transaction but can be nested. */
+    class savepoint : public checking, noncopyable {
+    public:
+        /// Begins a transaction.
+        /// @param db  The database.
+        /// @param autocommit  If true, the transaction will automatically commit when
+        ///     the destructor runs. Not recommended because destructors should not throw
+        ///     exceptions, so you won't know if it succeeded or not.
+        explicit savepoint(database& db, bool autocommit = false);
+        savepoint(savepoint&&);
+        ~savepoint();
 
-  /** Random access to the data in a blob. */
-  class blob_handle : public noncopyable {
-  public:
-    blob_handle(database& db,
-                const char *database,
-                const char* table, const char *column, int64_t rowid,
-                bool writeable);
-    ~blob_handle()                      {if (blob_) sqlite3_blob_close(blob_);}
-    uint64_t size() const               {return size_;}
-    ssize_t read(void *dst, size_t len, uint64_t offset);
+        /// Commits the savepoint.
+        /// @note  Changes made in a nested savepoint are not actually persisted until
+        ///     the outermost savepoint is committed.
+        status commit();
 
-  private:
-    sqlite3_blob*   blob_ = nullptr;
-    uint64_t        size_;
-  };
+        /// Rolls back (aborts) the savepoint. All changes made since the savepoint was
+        ///     created are removed.
+        status rollback();
+
+    private:
+        status execute(char const *cmd);
+
+        bool active_;
+        bool autocommit_;
+    };
+
+
+#pragma mark - BLOB HANDLE:
+
+
+    /** Random access to the data in a blob. */
+    class blob_handle : public checking, noncopyable {
+    public:
+        /// Opens a handle for reading a blob.
+        /// @note  If the blob doesn't exist, the behavior depends on the database's `exceptions`
+        ///     status. If they're enabled, this will throw an exception. If not, it will return
+        ///     normally, but `status` will return the error, and all reads will fail.
+        /// @param db  The `database` handle.
+        /// @param database  The "symbolic name" of the database:
+        ///     - For the main database file: "main".
+        ///     - For TEMP tables: "temp".
+        ///     - For attached databases: the name that appears after `AS` in the ATTACH statement.
+        /// @param table  The name of the table.
+        /// @param column  The name of the table column.
+        /// @param rowid  The row ID containing the blob.
+        /// @param writeable  True if you want to write to the data.
+        blob_handle(database& db,
+                    const char *database,
+                    const char* table,
+                    const char *column,
+                    int64_t rowid,
+                    bool writeable);
+
+        ~blob_handle()                      {if (blob_) sqlite3_blob_close(blob_);}
+
+        /// The status of the last operation: opening the blob handle, or the last read.
+        /// @note  If exceptions are enabled,
+        status status() const               {return status_;}
+
+        /// The size in bytes of the blob.
+        /// @note  This API uses `int` internally so blobs are limited to 2^31 bytes (~2GB.)
+        uint64_t size() const               {return size_;}
+
+        /// Reads from the blob.
+        /// @note  It is not an error to read past the end of the blob; the read will be truncated
+        ///     and the byte count returned will be less than you asked for. But it _is_ an error
+        ///     for the read to start past the end of the blob.
+        /// @param dst  The destination address to copy data to.
+        /// @param len  The number of bytes to read.
+        /// @param offset  The offset in the blob to start reading at.
+        /// @returns  The number of bytes actually read, or -1 on error; check `status()`.
+        /// @throws database_error  on error if exceptions are enabled.
+        [[nodiscard]] ssize_t pread(void *dst, size_t len, uint64_t offset) const;
+
+        /// Writes to the blob.
+        /// @note  Unlike reads, it _is_ an error to write past the end of a blob, since this may
+        ///     cause data loss. (The blob's length cannot be changed.)
+        /// @param src  The address of the data to write.
+        /// @param len  The number of bytes to write.
+        /// @param offset  The offset in the blob to start writing at.
+        /// @returns  The number of bytes actually written, or -1 on error; check `status()`.
+        /// @throws database_error  on error if exceptions are enabled.
+        [[nodiscard]] ssize_t pwrite(const void *src, size_t len, uint64_t offset);
+
+    private:
+        int range_check(size_t len, uint64_t offset) const;
+
+        sqlite3_blob*       blob_ = nullptr;
+        uint64_t            size_ = 0;
+        mutable enum status status_;
+    };
 
 } // namespace sqlite3pp
 
