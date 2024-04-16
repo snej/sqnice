@@ -358,24 +358,27 @@ namespace sqlite3pp {
         return check(sqlite3_clear_bindings(stmt_));
     }
 
-    status statement::bind(int idx, int value) {
+    status statement::bind_int(int idx, int value) {
         return check(sqlite3_bind_int(stmt_, idx, value));
     }
 
-    status statement::bind(int idx, double value) {
+    status statement::bind_double(int idx, double value) {
         return check(sqlite3_bind_double(stmt_, idx, value));
     }
 
-    status statement::bind(int idx, long int value) {
+    status statement::bind_int64(int idx, int64_t value) {
         return check(sqlite3_bind_int64(stmt_, idx, value));
     }
 
-    status statement::bind(int idx, long long int value) {
-        return check(sqlite3_bind_int64(stmt_, idx, value));
+    status statement::bind_uint64(int idx, uint64_t value) {
+        if (value > INT64_MAX) [[unlikely]]
+            throw std::domain_error("uint64_t value too large for SQLite");
+        return bind_int64(idx, int64_t(value));
     }
 
     status statement::bind(int idx, char const* value, copy_semantic fcopy) {
-        return check(sqlite3_bind_text(stmt_, idx, value, int(std::strlen(value)), fcopy == copy ? SQLITE_TRANSIENT : SQLITE_STATIC ));
+        return check(sqlite3_bind_text(stmt_, idx, value, int(std::strlen(value)),
+                                       fcopy == copy ? SQLITE_TRANSIENT : SQLITE_STATIC ));
     }
 
     status statement::bind(int idx, blob value) {
@@ -393,48 +396,8 @@ namespace sqlite3pp {
                                        fcopy == copy ? SQLITE_TRANSIENT : SQLITE_STATIC ));
     }
 
-    status statement::bind(int idx) {
+    status statement::bind(int idx, nullptr_t) {
         return check(sqlite3_bind_null(stmt_, idx));
-    }
-
-    status statement::bind(char const* name, int value) {
-        auto idx = sqlite3_bind_parameter_index(stmt_, name);
-        return bind(idx, value);
-    }
-
-    status statement::bind(char const* name, double value) {
-        auto idx = sqlite3_bind_parameter_index(stmt_, name);
-        return bind(idx, value);
-    }
-
-    status statement::bind(char const* name, long int value) {
-        auto idx = sqlite3_bind_parameter_index(stmt_, name);
-        return bind(idx, value);
-    }
-
-    status statement::bind(char const* name, long long int value) {
-        auto idx = sqlite3_bind_parameter_index(stmt_, name);
-        return bind(idx, value);
-    }
-
-    status statement::bind(char const* name, char const* value, copy_semantic fcopy) {
-        auto idx = sqlite3_bind_parameter_index(stmt_, name);
-        return bind(idx, value, fcopy);
-    }
-
-    status statement::bind(char const* name, std::span<const std::byte> value, copy_semantic fcopy) {
-        auto idx = sqlite3_bind_parameter_index(stmt_, name);
-        return bind(idx, value, fcopy);
-    }
-
-    status statement::bind(char const* name, std::string_view value, copy_semantic fcopy) {
-        auto idx = sqlite3_bind_parameter_index(stmt_, name);
-        return bind(idx, value, fcopy);
-    }
-
-    status statement::bind(char const* name) {
-        auto idx = sqlite3_bind_parameter_index(stmt_, name);
-        return bind(idx);
     }
 
     statement::bindref statement::operator[] (char const *name) {
@@ -463,10 +426,12 @@ namespace sqlite3pp {
     }
 
     status command::execute() {
-        auto rc = step();
-        if (rc == status::done) rc = status::ok;
+        return check(try_execute());
+    }
 
-        return check(rc);
+    status command::try_execute()  {
+        auto rc = step();
+        return rc == status::done ? status::ok : rc;
     }
 
     status command::execute_all() {
@@ -519,14 +484,18 @@ namespace sqlite3pp {
         return sqlite3_column_decltype(stmt_, idx);
     }
 
-
     query::iterator query::begin() {
         return iterator(this);
     }
 
-    query::iterator query::end() {
-        return iterator();
+    std::optional<query::row> query::single_row() {
+        switch (status rc = step()) {
+            case status::row:   return row(stmt_);
+            case status::done:  return std::nullopt;
+            default:            throw_(rc);
+        }
     }
+
 
 #pragma mark - QUERY ROW:
 
@@ -607,40 +576,26 @@ namespace sqlite3pp {
 #pragma mark - QUERY ITERATOR:
 
 
-    query::iterator::iterator() : cmd_(0), rows_(nullptr) {
-        rc_ = status::done;
-    }
-
-    query::iterator::iterator(query* cmd) : cmd_(cmd), rows_(cmd_->stmt_) {
-        rc_ = cmd_->step();
+    query::iterator::iterator(query* query) 
+    : query_(query)
+    , rc_ (query->step())
+    , rows_(query_->stmt_)
+    {
         if (rc_ != status::row && rc_ != status::done)
-            cmd_->throw_(rc_);
-    }
-
-    bool query::iterator::operator==(query::iterator const& other) const {
-        return rc_ == other.rc_;
-    }
-
-    bool query::iterator::operator!=(query::iterator const& other) const {
-        return rc_ != other.rc_;
+            query_->throw_(rc_);
     }
 
     query::iterator& query::iterator::operator++() {
-        rc_ = cmd_->step();
+        rc_ = query_->step();
         if (rc_ != status::row && rc_ != status::done)
-            cmd_->throw_(rc_);
+            query_->throw_(rc_);
         return *this;
     }
 
-    const query::iterator::value_type& query::iterator::operator*() const {
-        return rows_;
-    }
 
-    const query::iterator::value_type* query::iterator::operator->() const {
-        return &rows_;
-    }
+#pragma mark - TRANSACTION:
 
-
+    
     transaction::transaction(database& db, bool auto_commit, bool immediate)
     : checking(db)
     , active_(true)

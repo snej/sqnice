@@ -31,6 +31,7 @@
 #define SQLITE3PP_VERSION_MINOR 0
 #define SQLITE3PP_VERSION_PATCH 0
 
+#include <concepts>
 #include <functional>
 #include <optional>
 #include <span>
@@ -214,6 +215,13 @@ namespace sqlite3pp {
 
 #pragma mark - STATEMENT:
 
+    class statement;
+//    template <typename T> void bind_helper(statement&, int idx, T);
+
+    template <typename T>
+    concept bindable = requires(statement& stmt, T value) {
+        {bind_helper(stmt, 1, value)} -> std::same_as<status>;
+    };
 
     class null_type {};
     /** A singleton value representing SQL `NULL`, for use with the `bind` API. */
@@ -241,7 +249,6 @@ namespace sqlite3pp {
         status clear_bindings();
 
         class bindref;
-
         /// A reference to the `idx`'th parameter; assign a value to bind it.
         inline bindref operator[] (int idx);
         /// A reference to a named parameter; assign a value to bind it.
@@ -252,30 +259,44 @@ namespace sqlite3pp {
         bindstream binder(int idx = 1);
 
         // The following methods bind values to numbered parameters (`?` params start at 1)
-        status bind(int idx, int value);
-        status bind(int idx, double value);
-        status bind(int idx, long int value);
-        status bind(int idx, long long int value);
+        status bind(int idx, std::signed_integral auto v) {
+            static_assert(sizeof(v) <= 8);
+            if constexpr (sizeof(v) <= 4)
+                return bind_int(idx, v);
+            else
+                return bind_int64(idx, v);
+        }
+
+        status bind(int idx, std::unsigned_integral auto v) {
+            static_assert(sizeof(v) <= 8);
+            if constexpr (sizeof(v) < 4)
+                return bind_int(idx, int(v));
+            else if constexpr (sizeof(v) < 8)
+                return bind_int64(idx, int64_t(v));
+            else
+                return bind_uint64(idx, v);
+        }
+
+        status bind(int idx, std::floating_point auto v)        {return bind_double(idx, v);}
+
         status bind(int idx, char const* value, copy_semantic = copy);
+        status bind(int idx, std::string_view value, copy_semantic = copy);
+
         status bind(int idx, blob value);
         status bind(int idx, std::span<const std::byte> value, copy_semantic = copy);
-        status bind(int idx, std::string_view value, copy_semantic = copy);
-        status bind(int idx);
-        status bind(int idx, null_type)     {return bind(idx);}
-        status bind(int idx, nullptr_t)     {return bind(idx);}
 
-        // The following methods bind values to named parameters.
-        status bind(char const* name, int value);
-        status bind(char const* name, double value);
-        status bind(char const* name, long int value);
-        status bind(char const* name, long long int value);
-        status bind(char const* name, char const* value, copy_semantic = copy);
-        status bind(char const* name, blob value);
-        status bind(char const* name, std::span<const std::byte> value, copy_semantic = copy);
-        status bind(char const* name, std::string_view value, copy_semantic = copy);
-        status bind(char const* name);
-        status bind(char const* name, null_type)     {return bind(name);}
-        status bind(char const* name, nullptr_t)     {return bind(name);}
+        status bind(int idx, null_type)                         {return bind(idx, nullptr);}
+        status bind(int idx, nullptr_t);
+
+        template <bindable T>
+        status bind(int idx, T&& v)             {return bind_helper(*this, idx, std::forward<T>(v));}
+
+        /// Binds a value to a named parameter.
+        template <typename T>
+        status bind(char const* name, T&& v)    {return bind(bind_parameter_index(name), std::forward<T>(v));}
+
+        /// Returns the (1-based) index of a named parameter, or 0 if none exists.
+        int bind_parameter_index(const char* name) const   {return sqlite3_bind_parameter_index(stmt_, name);}
 
         /// Can be used to replace the SQL of the statement.
         status prepare(char const* sql);
@@ -291,6 +312,18 @@ namespace sqlite3pp {
         explicit statement(database& db, char const* stmt = nullptr);
         statement(statement&&) = default;
         ~statement();
+
+        status bind_int(int idx, int value);
+        status bind_int64(int idx, int64_t value);
+        status bind_uint64(int idx, uint64_t value);
+        status bind_double(int idx, double value);
+
+        template <typename T, typename... Args>
+        void _bind_args(int idx, T&& arg, Args... rest) {
+            bind(idx, std::forward<T>(arg));
+            if constexpr (sizeof...(rest) > 0)
+                _bind_args(idx + 1, rest...);
+        }
 
         void share(const statement&);
         status prepare_impl(char const* stmt);
@@ -343,9 +376,20 @@ namespace sqlite3pp {
         explicit command(database& db, char const* stmt = nullptr);
 
         /// Executes the statement.
-        /// @note  To get the rowid of an INSERT, call `database::last_insert_rowid`.
-        /// @note  To get the number of rows changed, call `database::changes()`.
+        /// @note  To get the rowid of an INSERT, call `last_insert_rowid`.
+        /// @note  To get the number of rows changed, call `changes()`.
         status execute();
+
+        /// Executes the statement, without throwing exceptions.
+        /// This is useful if you want to handle constraint errors.
+        [[nodiscard]] status try_execute();
+
+        /// Binds parameters to the arguments, then executes the statement.
+        template <typename... Args>
+        status execute(Args... args)        {_bind_args(1, args...); return execute();}
+
+        template <typename... Args>
+        status try_execute(Args... args)    {_bind_args(1, args...); return try_execute();}
 
         /// The last rowid inserted by this command, after executing it.
         int64_t last_insert_rowid() const   {return db_.last_insert_rowid();}
@@ -361,12 +405,6 @@ namespace sqlite3pp {
     };
 
 
-    template <class T>
-    struct convert {
-        using to_int = int;
-    };
-
-
     /** A `SELECT` statement, whose results can be iterated. */
     class query : public statement {
     public:
@@ -375,6 +413,10 @@ namespace sqlite3pp {
         /// Creates a new instance that shares the same underlying `sqlite3_stmt`.
         /// @warning  Do not use the copy after the original `command` is destructed!
         query shared_copy() const;
+
+        /// Binds its arguments to multiple query parameters starting at index 1.
+        template <typename... Args>
+        query& operator() (Args... args) {_bind_args(1, args...); return *this;}
 
         /// The number of columns the query will produce.
         int column_count() const;
@@ -391,19 +433,23 @@ namespace sqlite3pp {
         /// Runs the query and returns an iterator pointing to the first result row.
         iterator begin();
         /// An empty iterator representing the end of the rows.
-        iterator end();
+        inline iterator end();
+
+        /// A convenience method that runs the query and returns its first row,
+        /// or `nullopt` if there are no rows.
+        std::optional<row> single_row();
 
         /// A convenience method that runs the query and returns the value of the first row's
         /// first column. If there are no rows, returns `std::nullopt`.
         template <typename T>
-        std::optional<T> execute_single();
+        std::optional<T> single_value();
 
         template <typename T>
-        T execute_single_or(T const& defaultResult);
+        T single_value_or(T const& defaultResult);
 
-        // This doesn't work because `reset` invalidates the pointers in the `blob`; use string instead
-        template <> std::optional<blob> execute_single() = delete;
-        template <> blob execute_single_or(blob const&) = delete;
+        // Disabled because `reset` invalidates the pointers in the `blob`; use string instead
+        template <> std::optional<blob> single_value() = delete;
+        template <> blob single_value_or(blob const&) = delete;
     };
 
 
@@ -426,16 +472,12 @@ namespace sqlite3pp {
         /// Returns the value of the `idx`th column as C++ type `T`.
         template <class T> T get(int idx) const     {return get(idx, T());}
 
-        template <class... Ts>
-        std::tuple<Ts...> get_columns(typename convert<Ts>::to_int... idxs) const {
-            return std::make_tuple(get(idxs, Ts())...);
-        }
-
         class getstream;
         /// Returns a sort of input stream from which columns can be read using `>>`.
         getstream getter(int idx = 0) const;
 
     private:
+        friend class query;
         friend class query::iterator;
         explicit row(sqlite3_stmt* stmt);
 
@@ -475,16 +517,15 @@ namespace sqlite3pp {
     /** Iterator over a query's result rows. */
     class query::iterator {
     public:
-        iterator();
+        iterator() = default;
         explicit iterator(query* cmd);
 
-        bool operator==(iterator const&) const;
-        bool operator!=(iterator const&) const;
+        bool operator==(iterator const& other) const    {return rc_ == other.rc_;}
 
         iterator& operator++();
 
-        const row& operator*() const;
-        const row* operator->() const;
+        const row& operator*() const                    {return rows_;}
+        const row* operator->() const                   {return &rows_;}
 
         using iterator_category = std::input_iterator_tag;
         using value_type = row;
@@ -493,24 +534,28 @@ namespace sqlite3pp {
         using reference = row&;
 
     private:
-        query*  cmd_;
-        status  rc_;
-        row     rows_;
+        query*  query_  {0};
+        status  rc_     {status::done};
+        row     rows_   {nullptr};
     };
 
 
+    query::iterator query::end() {
+        return iterator();
+    }
+
     template <typename T>
-    std::optional<T> query::execute_single() {
+    std::optional<T> query::single_value() {
         std::optional<T> result;
-        if (auto i = begin(); i != end())
+        if (auto i = single_row())
             result = i->get<T>(0);
         reset();
         return result;
     }
 
     template <typename T>
-    T query::execute_single_or(T const& defaultResult) {
-        if (auto i = begin(); i != end()) {
+    T query::single_value_or(T const& defaultResult) {
+        if (auto i = single_row()) {
             T result = i->get<T>(0);
             reset();
             return result;
