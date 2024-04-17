@@ -27,7 +27,66 @@
 #include <memory>
 #include <assert.h>
 
+#ifdef SQLITE3PP_LOADABLE_EXTENSION
+#  include <sqlite3ext.h>
+    SQLITE_EXTENSION_INIT1
+#else
+#  include <sqlite3.h>
+#endif
+
 namespace sqlite3pp {
+
+    static_assert(int(status::ok)               == SQLITE_OK);
+    static_assert(int(status::error)            == SQLITE_ERROR);
+    static_assert(int(status::perm)             == SQLITE_PERM);
+    static_assert(int(status::abort)            == SQLITE_ABORT);
+    static_assert(int(status::busy)             == SQLITE_BUSY);
+    static_assert(int(status::locked)           == SQLITE_LOCKED);
+    static_assert(int(status::readonly)         == SQLITE_READONLY);
+    static_assert(int(status::interrupt)        == SQLITE_INTERRUPT);
+    static_assert(int(status::ioerr)            == SQLITE_IOERR);
+    static_assert(int(status::corrupt)          == SQLITE_CORRUPT);
+    static_assert(int(status::cantopen)         == SQLITE_CANTOPEN);
+    static_assert(int(status::constraint)       == SQLITE_CONSTRAINT);
+    static_assert(int(status::mismatch)         == SQLITE_MISMATCH);
+    static_assert(int(status::misuse)           == SQLITE_MISUSE);
+    static_assert(int(status::auth)             == SQLITE_AUTH);
+    static_assert(int(status::range)            == SQLITE_RANGE);
+    static_assert(int(status::done)             == SQLITE_DONE);
+    static_assert(int(status::row)              == SQLITE_ROW);
+
+    static_assert(int(open_flags::readonly)     == SQLITE_OPEN_READONLY);
+    static_assert(int(open_flags::readwrite)    == SQLITE_OPEN_READWRITE);
+    static_assert(int(open_flags::create)       == SQLITE_OPEN_CREATE);
+    static_assert(int(open_flags::uri)          == SQLITE_OPEN_URI);
+    static_assert(int(open_flags::memory)       == SQLITE_OPEN_MEMORY);
+    static_assert(int(open_flags::nomutex)      == SQLITE_OPEN_NOMUTEX);
+    static_assert(int(open_flags::fullmutex)    == SQLITE_OPEN_FULLMUTEX);
+    static_assert(int(open_flags::nofollow)     == SQLITE_OPEN_NOFOLLOW);
+    static_assert(int(open_flags::exrescode)    == SQLITE_OPEN_EXRESCODE);
+#ifdef __APPLE__
+    static_assert(int(open_flags::fileprotection_complete)
+                  == SQLITE_OPEN_FILEPROTECTION_COMPLETE);
+    static_assert(int(open_flags::fileprotection_complete_unless_open)
+                  == SQLITE_OPEN_FILEPROTECTION_COMPLETEUNLESSOPEN);
+    static_assert(int(open_flags::fileprotection_complete_until_auth) 
+                  == SQLITE_OPEN_FILEPROTECTION_COMPLETEUNTILFIRSTUSERAUTHENTICATION);
+    static_assert(int(open_flags::fileprotection_none) 
+                  == SQLITE_OPEN_FILEPROTECTION_NONE);
+#endif
+
+    static_assert(int(limit::row_length)        == SQLITE_LIMIT_LENGTH);
+    static_assert(int(limit::sql_length)        == SQLITE_LIMIT_SQL_LENGTH);
+    static_assert(int(limit::columns)           == SQLITE_LIMIT_COLUMN);
+    static_assert(int(limit::function_args)     == SQLITE_LIMIT_FUNCTION_ARG);
+    static_assert(int(limit::worker_threads)    == SQLITE_LIMIT_WORKER_THREADS);
+
+    static_assert(int(data_type::integer)       == SQLITE_INTEGER);
+    static_assert(int(data_type::floating_point)== SQLITE_FLOAT);
+    static_assert(int(data_type::text)          == SQLITE_TEXT);
+    static_assert(int(data_type::blob)          == SQLITE_BLOB);
+    static_assert(int(data_type::null)          == SQLITE_NULL);
+
 
     namespace {
         int busy_handler_impl(void* p, int cnt) {
@@ -90,23 +149,21 @@ namespace sqlite3pp {
 #pragma mark - DATABASE:
 
 
-    database::database(char const* dbname, int flags, char const* vfs)
+    database::database(char const* dbname, open_flags flags, char const* vfs)
     : checking(*this, false)
     , db_(nullptr)
     , borrowing_(false)
     {
-        if (dbname) {
-            auto rc = connect(dbname, flags, vfs);
-            if (rc != status::ok) {
-                std::string message;
-                if (db_) {
-                    message = sqlite3_errmsg(db_);
-                    sqlite3_close_v2(db_);
-                } else {
-                    message = "can't open database";
-                }
-                throw database_error(message.c_str(), rc);
+        assert(dbname);
+        if (auto rc = connect(dbname, flags, vfs); rc != status::ok) {
+            std::string message;
+            if (db_) {
+                message = sqlite3_errmsg(db_);
+                sqlite3_close_v2(db_);
+            } else {
+                message = "can't open database";
             }
+            throw database_error(message.c_str(), rc);
         }
     }
 
@@ -153,12 +210,10 @@ namespace sqlite3pp {
         return sqlite3_db_filename(db_, nullptr);
     }
 
-    status database::connect(char const* dbname, int flags, char const* vfs) {
-        if (!borrowing_) {
+    status database::connect(char const* dbname, open_flags flags, char const* vfs) {
+        if (!borrowing_)
             disconnect();
-        }
-
-        return check(sqlite3_open_v2(dbname, &db_, flags, vfs));
+        return check(sqlite3_open_v2(dbname, &db_, int(flags), vfs));
     }
 
     status database::disconnect() {
@@ -279,6 +334,18 @@ namespace sqlite3pp {
         return check(sqlite3_busy_timeout(db_, ms));
     }
 
+    bool database::in_transaction() const {
+        return !sqlite3_get_autocommit(db_);
+    }
+
+    unsigned database::get_limit(limit lim) const {
+        return sqlite3_limit(db_, int(lim), -1);
+    }
+
+    unsigned database::set_limit(limit lim, unsigned val) {
+        return sqlite3_limit(db_, int(lim), int(val));
+    }
+
 
 #pragma mark - STATEMENT:
 
@@ -299,6 +366,10 @@ namespace sqlite3pp {
         // finish() can return error. If you want to check the error, call
         // finish() explicitly before this object is destructed.
         finish();
+    }
+
+    int statement::bind_parameter_index(const char* name) const {
+        return sqlite3_bind_parameter_index(stmt_, name);
     }
 
     status statement::prepare(char const* stmt) {
@@ -409,12 +480,6 @@ namespace sqlite3pp {
 #pragma mark - COMMAND:
 
 
-    command::command(database& db, char const* stmt) 
-    : statement(db, stmt)
-    {
-        exceptions(db.exceptions());
-    }
-
     statement::bindstream statement::binder(int idx) {
         return bindstream(*this, idx);
     }
@@ -462,10 +527,6 @@ namespace sqlite3pp {
 #pragma mark - QUERY:
 
 
-    query::query(database& db, char const* stmt) 
-    : statement(db, stmt)
-    { }
-
     query query::shared_copy() const {
         query q(db_);
         q.share(*this);
@@ -502,10 +563,6 @@ namespace sqlite3pp {
 
     int query::row::column_count() const {
         return sqlite3_data_count(stmt_);
-    }
-
-    int query::row::column_type(int idx) const {
-        return sqlite3_column_type(stmt_, idx);
     }
 
     int query::row::column_bytes(int idx) const {
@@ -560,6 +617,11 @@ namespace sqlite3pp {
     query::row::getstream query::row::getter(int idx) const {
         return getstream(this, idx);
     }
+
+    data_type query::row::column::type() const {
+        return data_type{sqlite3_column_type(row_.stmt_, idx_)};
+    }
+
 
 #pragma mark - QUERY ITERATOR:
 
@@ -682,6 +744,12 @@ namespace sqlite3pp {
         status_ = check(sqlite3_blob_open(db.db_, database, table, column, rowid, writeable, &blob_));
         if (status_ == status::ok)
             size_ = sqlite3_blob_bytes(blob_);
+    }
+
+
+    blob_handle::~blob_handle() {
+        if (blob_)
+            sqlite3_blob_close(blob_);
     }
 
 

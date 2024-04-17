@@ -41,13 +41,23 @@
 #include <tuple>
 #include <unordered_map>
 
-#ifdef SQLITE3PP_LOADABLE_EXTENSION
-#  include <sqlite3ext.h>
-    SQLITE_EXTENSION_INIT1
+#if __has_feature(nullability)
+#  define ASSUME_NONNULL_BEGIN  _Pragma("clang assume_nonnull begin")
+#  define ASSUME_NONNULL_END    _Pragma("clang assume_nonnull end")
 #else
-#  include <sqlite3.h>
+#  define ASSUME_NONNULL_BEGIN
+#  define ASSUME_NONNULL_END
+#  define _Nullable
+#  ifndef _Nonnull
+#    define _Nonnull
+#  endif
 #endif
 
+ASSUME_NONNULL_BEGIN
+
+struct sqlite3;
+struct sqlite3_blob;
+struct sqlite3_stmt;
 
 namespace sqlite3pp {
     
@@ -73,15 +83,17 @@ namespace sqlite3pp {
         noncopyable& operator=(noncopyable const&) = delete;
     };
 
-    /** A SQLite error code. */
+    /** A SQLite error code. Values are the same as `SQLITE_OK`, `SQLITE_ERROR`, ... */
     enum class status : int {
-        ok          = SQLITE_OK,
-        busy        = SQLITE_BUSY,
-        locked      = SQLITE_LOCKED,
-        constraint  = SQLITE_CONSTRAINT,
-        misuse      = SQLITE_MISUSE,
-        done        = SQLITE_DONE,
-        row         = SQLITE_ROW,
+        ok          = 0,      corrupt     = 11,
+        error       = 1,      cantopen    = 14,
+        perm        = 3,      constraint  = 19,
+        abort       = 4,      mismatch    = 20,
+        busy        = 5,      misuse      = 21,
+        locked      = 6,      auth        = 23,
+        readonly    = 8,      range       = 25,
+        interrupt   = 9,      row         = 100,
+        ioerr       = 10,     done        = 101,
     };
 
     /// Masks out other bits set in extended status codes
@@ -127,19 +139,55 @@ namespace sqlite3pp {
 #pragma mark - DATABASE:
 
 
+    /** Flags used when opening a database; equivalent to `SQLITE_OPEN_...` macros in sqlite3.h. */
+    enum class open_flags : int {
+        readonly        = 0x00000001,   ///< Open database file as read-only
+        readwrite       = 0x00000002,   ///< Open database file as writeable, if possible
+        create          = 0x00000004,   ///< Create database file if it doesn't exist
+        uri             = 0x00000040,   ///< filename may be a `file:` URI (see docs)
+        memory          = 0x00000080,   ///< Open a temporary in-memory database
+        nomutex         = 0x00008000,   ///< Use the "multi-thread" threading mode (see docs)
+        fullmutex       = 0x00010000,   ///< Use the "serialized" threading mode (see docs)
+        nofollow        = 0x01000000,   ///< Symbolic links in path will not be followed
+        exrescode       = 0x02000000,   ///< Enable extended result codes
+#ifdef __APPLE__
+        // Add no more than one of these, to specify an iOS file protection mode.
+        fileprotection_complete             = 0x00100000,
+        fileprotection_complete_unless_open = 0x00200000,
+        fileprotection_complete_until_auth  = 0x00300000,
+        fileprotection_none                 = 0x00400000,
+#endif
+    };
+
+    inline open_flags operator| (open_flags a, open_flags b) {return open_flags(int(a) | int(b));}
+    inline open_flags operator& (open_flags a, open_flags b) {return open_flags(int(a) & int(b));}
+    inline open_flags operator- (open_flags a, open_flags b) {return open_flags(int(a) & ~int(b));}
+    inline open_flags& operator|= (open_flags& a, open_flags b) {a = a | b; return a;}
+
+    /** Per-database size/quantity limits that can be adjusted. */
+    enum class limit : int {
+        row_length      =  0,
+        sql_length      =  1,
+        columns         =  2,
+        function_args   =  6,
+        worker_threads  = 11,
+    };
+
+
     /** A SQLite database connection. */
     class database : public checking, noncopyable {
     public:
-        explicit database(char const* dbname = nullptr,
-                          int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
-                          const char* vfs = nullptr);
+        explicit database(char const* dbname,
+                          open_flags flags           = open_flags::readwrite | open_flags::create,
+                          const char*  _Nullable vfs = nullptr);
 
+        ~database();
         database(database&& db);
         database& operator=(database&& db);
 
-        ~database();
-
-        status connect(char const* dbname, int flags, const char* vfs = nullptr);
+        status connect(char const* dbname,
+                       open_flags flags           = open_flags::readwrite | open_flags::create,
+                       const char*  _Nullable vfs = nullptr);
         status disconnect();
 
         status attach(char const* dbname, char const* name);
@@ -160,7 +208,7 @@ namespace sqlite3pp {
 
         status error_code() const;
         status extended_error_code() const;
-        char const* error_msg() const;
+        char const* _Nullable error_msg() const;
 
         /** Executes a (non-`SELECT`) statement, or multiple statements separated by `;`. */
         status execute(char const* sql);
@@ -192,6 +240,11 @@ namespace sqlite3pp {
         status backup(database& destdb, backup_handler h = {});
         status backup(char const* dbname, database& destdb, char const* destdbname, backup_handler h, int step_page = 5);
 
+        bool in_transaction() const;
+
+        unsigned get_limit(limit) const;
+        unsigned set_limit(limit, unsigned);
+
     private:
         friend class statement;
         friend class database_error;
@@ -203,7 +256,7 @@ namespace sqlite3pp {
         database(sqlite3* pdb);
 
     private:
-        sqlite3*            db_;
+        sqlite3* _Nullable  db_;
         bool                borrowing_;
         busy_handler        bh_;
         commit_handler      ch_;
@@ -233,9 +286,9 @@ namespace sqlite3pp {
 
     /** A blob value to bind to a statement parameter. */
     struct blob {
-        const void* data;
-        size_t size;
-        copy_semantic fcopy;
+        const void* _Nullable   data  = nullptr;
+        size_t                  size  =  0;
+        copy_semantic           fcopy = copy;
     };
 
 
@@ -280,7 +333,7 @@ namespace sqlite3pp {
 
         status bind(int idx, std::floating_point auto v)        {return bind_double(idx, v);}
 
-        status bind(int idx, char const* value, copy_semantic = copy);
+        status bind(int idx, char const* _Nullable value, copy_semantic = copy);
         status bind(int idx, std::string_view value, copy_semantic = copy);
 
         status bind(int idx, blob value);
@@ -297,7 +350,7 @@ namespace sqlite3pp {
         status bind(char const* name, T&& v)    {return bind(bind_parameter_index(name), std::forward<T>(v));}
 
         /// Returns the (1-based) index of a named parameter, or 0 if none exists.
-        int bind_parameter_index(const char* name) const   {return sqlite3_bind_parameter_index(stmt_, name);}
+        int bind_parameter_index(const char* name) const;
 
         /// Can be used to replace the SQL of the statement.
         status prepare(char const* sql);
@@ -310,7 +363,7 @@ namespace sqlite3pp {
         operator bool() const           {return prepared();}
 
     protected:
-        explicit statement(database& db, char const* stmt = nullptr);
+        explicit statement(database& db, char const* _Nullable stmt = nullptr);
         statement(statement&&) = default;
         ~statement();
 
@@ -332,9 +385,9 @@ namespace sqlite3pp {
         status step();
 
     protected:
-        sqlite3_stmt*   stmt_;
-        char const*     tail_;
-        bool            shared_ = false;
+        sqlite3_stmt* _Nullable stmt_;
+        char const* _Nullable   tail_;
+        bool                    shared_ = false;
     };
 
 
@@ -374,7 +427,7 @@ namespace sqlite3pp {
     /** A SQL statement other than `SELECT`; i.e. `INSERT`, `UPDATE`, `CREATE`... */
     class command : public statement {
     public:
-        explicit command(database& db, char const* stmt = nullptr);
+        command(database& db, char const* stmt)         :statement(db, stmt) { }
 
         /// Executes the statement.
         /// @note  To get the rowid of an INSERT, call `last_insert_rowid`.
@@ -405,13 +458,16 @@ namespace sqlite3pp {
         command shared_copy() const;
 
         [[deprecated]] status execute_all();
+
+    private:
+        explicit command(database& db)                  :statement(db) { }
     };
 
 
     /** A `SELECT` statement, whose results can be iterated. */
     class query : public statement {
     public:
-        explicit query(database& db, char const* stmt = nullptr);
+        query(database& db, char const* stmt)       :statement(db, stmt) { }
 
         /// Creates a new instance that shares the same underlying `sqlite3_stmt`.
         /// @warning  Do not use the copy after the original `command` is destructed!
@@ -456,6 +512,9 @@ namespace sqlite3pp {
         // (Disabled because `reset` invalidates the pointers in the `blob`; use string instead.)
         template <> std::optional<blob> single_value() = delete;
         template <> blob single_value_or(blob const&) = delete;
+
+    private:
+        explicit query(database& db)    :statement(db) { }
     };
 
 
@@ -468,18 +527,21 @@ namespace sqlite3pp {
     };
 
 
+    enum class data_type : int {
+        integer         = 1,
+        floating_point  = 2,
+        text            = 3,
+        blob            = 4,
+        null            = 5,
+    };
+
+
     /** Represents the current row of a query being iterated.
         @note  Columns are numbered from 0. */
     class query::row {
     public:
         /// The number of columns in the row. (Same as `query::column_count`.)
         int column_count() const;
-
-        /// The SQLite data type of the `idx`th column -- `SQLITE_INTEGER`, `SQLITE_TEXT`, etc.
-        int column_type(int idx) const;
-
-        /// True if the `idx`th column value is not `NULL`.
-        bool not_null(int idx) const                {return column_type(idx) != SQLITE_NULL;}
 
         /// The length in bytes of a BLOB or a UTF-8 TEXT value.
         int column_bytes(int idx) const;
@@ -503,6 +565,7 @@ namespace sqlite3pp {
         friend class query::iterator;
         friend class column;
 
+        row() = default;
         explicit row(sqlite3_stmt* stmt);
 
         template <std::signed_integral T>
@@ -522,10 +585,10 @@ namespace sqlite3pp {
         }
 
         double get(int idx, double) const;
-        char const* get(int idx, char const*) const;
+        char const* get(int idx, char const* _Nullable) const;
         std::string get(int idx, std::string) const;
         std::string_view get(int idx, std::string_view) const;
-        void const* get(int idx, void const*) const;
+        void const* get(int idx, void const* _Nullable) const;
         bool get(int idx, bool) const       {return get_int(idx) != 0;}
         blob get(int idx, blob) const;
         null_type get(int idx, null_type) const;
@@ -535,7 +598,7 @@ namespace sqlite3pp {
         double get_double(int idx) const;
 
     private:
-        sqlite3_stmt* stmt_;
+        sqlite3_stmt* _Nullable stmt_ = nullptr;
     };
 
 
@@ -545,9 +608,12 @@ namespace sqlite3pp {
         template <typename T>
         operator T() const          {return row_.get<T>(idx_);}
 
-        int type() const            {return row_.column_type(idx_);}
-        bool is_blob() const        {return type() == SQLITE_BLOB;}
-        bool not_null() const       {return row_.not_null(idx_);}
+        /// The length in bytes of a text or blob value.
+        size_t length() const;
+
+        data_type type() const;
+        bool is_blob() const        {return type() == data_type::blob;}
+        bool not_null() const       {return type() != data_type::null;}
 
     private:
         friend class query::row;
@@ -581,9 +647,6 @@ namespace sqlite3pp {
     /** Iterator over a query's result rows. */
     class query::iterator {
     public:
-        iterator() = default;
-        explicit iterator(query* cmd);
-
         bool operator==(iterator const& other) const    {return rc_ == other.rc_;}
 
         iterator& operator++();
@@ -604,9 +667,13 @@ namespace sqlite3pp {
         using reference = row&;
 
     private:
-        query*  query_  {0};
+        friend class query;
+        iterator() = default;
+        explicit iterator(query* _Nullable cmd);
+
+        query* _Nullable  query_  {0};
         status  rc_     {status::done};
-        row     rows_   {nullptr};
+        row     rows_;
     };
 
 
@@ -771,7 +838,7 @@ namespace sqlite3pp {
                     int64_t rowid,
                     bool writeable);
 
-        ~blob_handle()                      {if (blob_) sqlite3_blob_close(blob_);}
+        ~blob_handle();
 
         /// The status of the last operation: opening the blob handle, or the last read.
         /// @note  If exceptions are enabled,
@@ -805,11 +872,13 @@ namespace sqlite3pp {
     private:
         int range_check(size_t len, uint64_t offset) const;
 
-        sqlite3_blob*       blob_ = nullptr;
-        uint64_t            size_ = 0;
-        mutable enum status status_;
+        sqlite3_blob* _Nullable blob_ = nullptr;
+        uint64_t                size_ = 0;
+        mutable enum status     status_;
     };
 
 } // namespace sqlite3pp
 
 #endif
+
+ASSUME_NONNULL_END
