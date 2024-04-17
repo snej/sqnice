@@ -1,4 +1,4 @@
-// sqlite3pp.cpp
+// sqlite3pp.cc
 //
 // The MIT License
 //
@@ -22,7 +22,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "sqlite3pp.h"
+#include "sqlite3pp.hh"
 #include <cstring>
 #include <memory>
 #include <assert.h>

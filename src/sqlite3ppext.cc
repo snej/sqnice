@@ -1,4 +1,4 @@
-// sqlite3ppext.cpp
+// sqlite3ppext.cc
 //
 // The MIT License
 //
@@ -24,7 +24,7 @@
 
 #include <cstring>
 
-#include "sqlite3ppext.h"
+#include "sqlite3ppext.hh"
 
 namespace sqlite3pp
 {
