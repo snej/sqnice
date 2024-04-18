@@ -22,7 +22,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "sqlite3pp.hh"
+#include "sqlite3pp/blob_stream.hh"
+#include "sqlite3pp/database.hh"
+#include "sqlite3pp/query.hh"
+#include "sqlite3pp/transaction.hh"
 #include <cstring>
 #include <memory>
 #include <assert.h>
@@ -499,6 +502,11 @@ namespace sqlite3pp {
         return rc == status::done ? status::ok : rc;
     }
 
+    int64_t command::last_insert_rowid() const   {return db_.last_insert_rowid();}
+
+    int command::changes() const                 {return db_.changes();}
+
+
     status command::execute_all() {
         auto rc = execute();
         if (rc != status::ok) return rc;
@@ -732,10 +740,10 @@ namespace sqlite3pp {
     }
 
 
-#pragma mark - BLOB HANDLE:
+#pragma mark - BLOB STREAM:
 
 
-    blob_handle::blob_handle(database& db,
+    blob_stream::blob_stream(database& db,
                              const char *database,
                              const char* table, const char *column, int64_t rowid,
                              bool writeable)
@@ -747,13 +755,13 @@ namespace sqlite3pp {
     }
 
 
-    blob_handle::~blob_handle() {
+    blob_stream::~blob_stream() {
         if (blob_)
             sqlite3_blob_close(blob_);
     }
 
 
-    int blob_handle::range_check(size_t len, uint64_t offset) const {
+    int blob_stream::range_check(size_t len, uint64_t offset) const {
         if (!blob_) {
             return -1;
         } else if (offset + len <= size_ && offset < INT_MAX) {
@@ -768,7 +776,7 @@ namespace sqlite3pp {
     }
 
 
-    ssize_t blob_handle::pread(void *dst, size_t len, uint64_t offset) const {
+    int blob_stream::pread(void *dst, size_t len, uint64_t offset) const {
         int checked_len = range_check(len, offset);
         if (checked_len < 0)
             return -1;
@@ -777,7 +785,7 @@ namespace sqlite3pp {
     }
 
 
-    ssize_t blob_handle::pwrite(const void *src, size_t len, uint64_t offset) {
+    int blob_stream::pwrite(const void *src, size_t len, uint64_t offset) {
         int checked_len = range_check(len, offset);
         if (checked_len < 0 || size_t(checked_len) < len)
             return -1;

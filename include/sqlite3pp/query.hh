@@ -1,4 +1,4 @@
-// sqlite3pp.hh
+// sqlite3pp/database.hh
 //
 // The MIT License
 //
@@ -23,251 +23,26 @@
 // THE SOFTWARE.
 
 #pragma once
-#ifndef SQLITE3PP_H
-#define SQLITE3PP_H
+#ifndef SQLITE3PP_QUERY_H
+#define SQLITE3PP_QUERY_H
 
-#define SQLITE3PP_VERSION "2.0.0"
-#define SQLITE3PP_VERSION_MAJOR 2
-#define SQLITE3PP_VERSION_MINOR 0
-#define SQLITE3PP_VERSION_PATCH 0
-
+#include "sqlite3pp/base.hh"
 #include <concepts>
-#include <functional>
+#include <cstddef>
+#include <iterator>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
 
-#if __has_feature(nullability)
-#  define ASSUME_NONNULL_BEGIN  _Pragma("clang assume_nonnull begin")
-#  define ASSUME_NONNULL_END    _Pragma("clang assume_nonnull end")
-#else
-#  define ASSUME_NONNULL_BEGIN
-#  define ASSUME_NONNULL_END
-#  define _Nullable
-#  ifndef _Nonnull
-#    define _Nonnull
-#  endif
-#endif
-
 ASSUME_NONNULL_BEGIN
 
-struct sqlite3;
-struct sqlite3_blob;
 struct sqlite3_stmt;
 
 namespace sqlite3pp {
-    
     class database;
-
-    // Defined in sqlite3ppext.hh
-    namespace ext {
-        class function;
-        class aggregate;
-        database borrow(sqlite3*);
-    }
-
-    /** Classes inheriting from this cannot be copied, but can be moved. */
-    class noncopyable {
-    protected:
-        noncopyable() = default;
-        ~noncopyable() = default;
-
-        noncopyable(noncopyable&&) = default;
-        noncopyable& operator=(noncopyable&&) = default;
-
-        noncopyable(noncopyable const&) = delete;
-        noncopyable& operator=(noncopyable const&) = delete;
-    };
-
-    /** A SQLite error code. Values are the same as `SQLITE_OK`, `SQLITE_ERROR`, ... */
-    enum class status : int {
-        ok          = 0,      corrupt     = 11,
-        error       = 1,      cantopen    = 14,
-        perm        = 3,      constraint  = 19,
-        abort       = 4,      mismatch    = 20,
-        busy        = 5,      misuse      = 21,
-        locked      = 6,      auth        = 23,
-        readonly    = 8,      range       = 25,
-        interrupt   = 9,      row         = 100,
-        ioerr       = 10,     done        = 101,
-    };
-
-    /// Masks out other bits set in extended status codes
-    inline status basic_status(status s)                    {return status{int(s) & 0xff};}
-    /// True if a `status` is successful (not an error.)
-    inline bool ok(status s)                                {return s == status::ok;}
-
-    /** Exception class thrown by this API. */
-    class database_error : public std::runtime_error {
-    public:
-        explicit database_error(char const* msg, status rc);
-        explicit database_error(database& db, status rc);
-        explicit database_error(char const* msg, int rc)    :database_error(msg,status{rc}) { }
-        explicit database_error(database& db, int rc)       :database_error(db,status{rc}) { }
-
-        status const error_code;
-    };
-
-
-    /** A base class that handles exceptions by throwing or returning an error code.
-        Most of the other classes derive from this. */
-    class checking {
-    public:
-        /// Enables or disables exceptions. 
-        /// For a `database`, this defaults to false.
-        /// For other objects, it defaults to the value in the `database` they are created from.
-        void exceptions(bool x)     {exceptions_ = x;}
-        /// True if exceptions are enabled.
-        bool exceptions()           {return exceptions_;}
-    protected:
-        checking(database &db, bool x)              :db_(db), exceptions_(x) { }
-        explicit checking(database &db);
-        status check(status rc) const;
-        status check(int rc) const                  {return check(status{rc});}
-        [[noreturn]] void throw_(status rc) const;
-        [[noreturn]] void throw_(int rc) const      {throw_(status{rc});}
-
-        database&   db_;
-        bool        exceptions_ = false;
-    };
-
-
-#pragma mark - DATABASE:
-
-
-    /** Flags used when opening a database; equivalent to `SQLITE_OPEN_...` macros in sqlite3.h. */
-    enum class open_flags : int {
-        readonly        = 0x00000001,   ///< Open database file as read-only
-        readwrite       = 0x00000002,   ///< Open database file as writeable, if possible
-        create          = 0x00000004,   ///< Create database file if it doesn't exist
-        uri             = 0x00000040,   ///< filename may be a `file:` URI (see docs)
-        memory          = 0x00000080,   ///< Open a temporary in-memory database
-        nomutex         = 0x00008000,   ///< Use the "multi-thread" threading mode (see docs)
-        fullmutex       = 0x00010000,   ///< Use the "serialized" threading mode (see docs)
-        nofollow        = 0x01000000,   ///< Symbolic links in path will not be followed
-        exrescode       = 0x02000000,   ///< Enable extended result codes
-#ifdef __APPLE__
-        // Add no more than one of these, to specify an iOS file protection mode.
-        fileprotection_complete             = 0x00100000,
-        fileprotection_complete_unless_open = 0x00200000,
-        fileprotection_complete_until_auth  = 0x00300000,
-        fileprotection_none                 = 0x00400000,
-#endif
-    };
-
-    inline open_flags operator| (open_flags a, open_flags b) {return open_flags(int(a) | int(b));}
-    inline open_flags operator& (open_flags a, open_flags b) {return open_flags(int(a) & int(b));}
-    inline open_flags operator- (open_flags a, open_flags b) {return open_flags(int(a) & ~int(b));}
-    inline open_flags& operator|= (open_flags& a, open_flags b) {a = a | b; return a;}
-
-    /** Per-database size/quantity limits that can be adjusted. */
-    enum class limit : int {
-        row_length      =  0,
-        sql_length      =  1,
-        columns         =  2,
-        function_args   =  6,
-        worker_threads  = 11,
-    };
-
-
-    /** A SQLite database connection. */
-    class database : public checking, noncopyable {
-    public:
-        explicit database(char const* dbname,
-                          open_flags flags           = open_flags::readwrite | open_flags::create,
-                          const char*  _Nullable vfs = nullptr);
-
-        ~database();
-        database(database&& db);
-        database& operator=(database&& db);
-
-        status connect(char const* dbname,
-                       open_flags flags           = open_flags::readwrite | open_flags::create,
-                       const char*  _Nullable vfs = nullptr);
-        status disconnect();
-
-        status attach(char const* dbname, char const* name);
-        status detach(char const* name);
-
-        const char* filename() const;
-
-        sqlite3* handle() const         {return db_;}
-
-        int64_t last_insert_rowid() const;
-
-        status enable_foreign_keys(bool enable = true);
-        status enable_triggers(bool enable = true);
-        status enable_extended_result_codes(bool enable = true);
-
-        int changes() const;
-        int64_t total_changes() const;
-
-        status error_code() const;
-        status extended_error_code() const;
-        char const* _Nullable error_msg() const;
-
-        /** Executes a (non-`SELECT`) statement, or multiple statements separated by `;`. */
-        status execute(char const* sql);
-
-        /** Same as `execute` but uses `printf`-style formatting to produce the SQL string.
-            @warning If using `%s`, be **very careful** not to introduce SQL injection attacks! */
-        status executef(char const* sql, ...)
-#ifdef SQLITE3PP_TYPECHECK_EXECUTEF
-                                                __attribute__((__format__ (__printf__, 2, 3)))
-#endif
-        ;
-
-        status set_busy_timeout(int ms);
-
-        using busy_handler = std::function<status (int)>;
-        using commit_handler = std::function<status ()>;
-        using rollback_handler = std::function<void ()>;
-        using update_handler = std::function<void (int, char const*, char const*, long long int)>;
-        using authorize_handler = std::function<status (int, char const*, char const*, char const*, char const*)>;
-
-        void set_busy_handler(busy_handler h);
-        void set_commit_handler(commit_handler h);
-        void set_rollback_handler(rollback_handler h);
-        void set_update_handler(update_handler h);
-        void set_authorize_handler(authorize_handler h);
-
-        using backup_handler = std::function<void (int, int, status)>;
-
-        status backup(database& destdb, backup_handler h = {});
-        status backup(char const* dbname, database& destdb, char const* destdbname, backup_handler h, int step_page = 5);
-
-        bool in_transaction() const;
-
-        unsigned get_limit(limit) const;
-        unsigned set_limit(limit, unsigned);
-
-    private:
-        friend class statement;
-        friend class database_error;
-        friend class blob_handle;
-        friend class ext::function;
-        friend class ext::aggregate;
-        friend database ext::borrow(sqlite3* pdb);
-
-        database(sqlite3* pdb);
-
-    private:
-        sqlite3* _Nullable  db_;
-        bool                borrowing_;
-        busy_handler        bh_;
-        commit_handler      ch_;
-        rollback_handler    rh_;
-        update_handler      uh_;
-        authorize_handler   ah_;
-    };
-
-
-#pragma mark - STATEMENT:
-
     class statement;
 
     // Declaring a function `sqlite3cpp::bind_helper(statement&, int, T)` allows the type T to be
@@ -277,12 +52,15 @@ namespace sqlite3pp {
         {bind_helper(stmt, 1, value)} -> std::same_as<status>;
     };
 
+
     class null_type {};
     /** A singleton value representing SQL `NULL`, for use with the `bind` API. */
     constexpr null_type ignore;
 
+
     /** Specifies how string and blob values are bound. `copy` is safer, `nocopy` faster.*/
     enum copy_semantic { copy, nocopy };
+
 
     /** A blob value to bind to a statement parameter. */
     struct blob {
@@ -448,10 +226,10 @@ namespace sqlite3pp {
         [[nodiscard]] status try_execute(Args... args) {_bind_args(1, args...); return try_execute();}
 
         /// The last rowid inserted by this command, after executing it.
-        int64_t last_insert_rowid() const   {return db_.last_insert_rowid();}
+        int64_t last_insert_rowid() const;
 
         /// The number of rows changed by this command, after executing it.
-        int changes() const                 {return db_.changes();}
+        int changes() const;
 
         /// Creates a new instance that shares the same underlying `sqlite3_stmt`.
         /// @warning  Do not use the copy after the original `command` is destructed!
@@ -487,7 +265,7 @@ namespace sqlite3pp {
 
         /// The name of the `idx`'th column.
         char const* column_name(int idx) const;
-        
+
         /// The declared type of the `idx`th column in the table's schema. Not generally useful.
         char const* column_decltype(int idx) const;
 
@@ -749,136 +527,8 @@ namespace sqlite3pp {
     /** A cache of pre-compiled `query` objects. */
     using query_cache = statement_cache<query>;
 
-
-#pragma mark - TRANSACTIONS:
-
-
-    /** An RAII wrapper around SQLite's `BEGIN` and `COMMIT`/`ROLLBACK` commands.
-        @note  These do not nest! If you need nesting, use `savepoint` instead. */
-    class transaction : public checking, noncopyable {
-    public:
-        /// Begins a transaction.
-        /// @param db  The database.
-        /// @param autocommit  If true, the transaction will automatically commit when
-        ///     the destructor runs. Not recommended because destructors should not throw
-        ///     exceptions, so you won't know if it succeeded or not.
-        /// @param immediate  If true, uses `BEGIN IMMEDIATE`, which immediately grabs
-        ///     the database lock. If false, the first write you make in the transaction
-        ///     will try to grab the lock but will fail if another transaction is active.
-        /// @throws database_error if a transaction is already active.
-        explicit transaction(database& db,
-                             bool autocommit = false,
-                             bool immediate = true);
-        transaction(transaction&&);
-        ~transaction();
-
-        /// Commits the transaction.
-        status commit();
-        /// Rolls back (aborts) the transaction.
-        status rollback();
-
-    private:
-        bool active_;
-        bool autocommit_;
-    };
-
-    
-    /** A savepoint is like a transaction but can be nested. */
-    class savepoint : public checking, noncopyable {
-    public:
-        /// Begins a transaction.
-        /// @param db  The database.
-        /// @param autocommit  If true, the transaction will automatically commit when
-        ///     the destructor runs. Not recommended because destructors should not throw
-        ///     exceptions, so you won't know if it succeeded or not.
-        explicit savepoint(database& db, bool autocommit = false);
-        savepoint(savepoint&&);
-        ~savepoint();
-
-        /// Commits the savepoint.
-        /// @note  Changes made in a nested savepoint are not actually persisted until
-        ///     the outermost savepoint is committed.
-        status commit();
-
-        /// Rolls back (aborts) the savepoint. All changes made since the savepoint was
-        ///     created are removed.
-        status rollback();
-
-    private:
-        status execute(char const *cmd);
-
-        bool active_;
-        bool autocommit_;
-    };
-
-
-#pragma mark - BLOB HANDLE:
-
-
-    /** Random access to the data in a blob. */
-    class blob_handle : public checking, noncopyable {
-    public:
-        /// Opens a handle for reading a blob.
-        /// @note  If the blob doesn't exist, the behavior depends on the database's `exceptions`
-        ///     status. If they're enabled, this will throw an exception. If not, it will return
-        ///     normally, but `status` will return the error, and all reads will fail.
-        /// @param db  The `database` handle.
-        /// @param database  The "symbolic name" of the database:
-        ///     - For the main database file: "main".
-        ///     - For TEMP tables: "temp".
-        ///     - For attached databases: the name that appears after `AS` in the ATTACH statement.
-        /// @param table  The name of the table.
-        /// @param column  The name of the table column.
-        /// @param rowid  The row ID containing the blob.
-        /// @param writeable  True if you want to write to the data.
-        blob_handle(database& db,
-                    const char *database,
-                    const char* table,
-                    const char *column,
-                    int64_t rowid,
-                    bool writeable);
-
-        ~blob_handle();
-
-        /// The status of the last operation: opening the blob handle, or the last read.
-        /// @note  If exceptions are enabled,
-        status status() const               {return status_;}
-
-        /// The size in bytes of the blob.
-        /// @note  This API uses `int` internally so blobs are limited to 2^31 bytes (~2GB.)
-        uint64_t size() const               {return size_;}
-
-        /// Reads from the blob.
-        /// @note  It is not an error to read past the end of the blob; the read will be truncated
-        ///     and the byte count returned will be less than you asked for. But it _is_ an error
-        ///     for the read to start past the end of the blob.
-        /// @param dst  The destination address to copy data to.
-        /// @param len  The number of bytes to read.
-        /// @param offset  The offset in the blob to start reading at.
-        /// @returns  The number of bytes actually read, or -1 on error; check `status()`.
-        /// @throws database_error  on error if exceptions are enabled.
-        [[nodiscard]] ssize_t pread(void *dst, size_t len, uint64_t offset) const;
-
-        /// Writes to the blob.
-        /// @note  Unlike reads, it _is_ an error to write past the end of a blob, since this may
-        ///     cause data loss. (The blob's length cannot be changed.)
-        /// @param src  The address of the data to write.
-        /// @param len  The number of bytes to write.
-        /// @param offset  The offset in the blob to start writing at.
-        /// @returns  The number of bytes actually written, or -1 on error; check `status()`.
-        /// @throws database_error  on error if exceptions are enabled.
-        [[nodiscard]] ssize_t pwrite(const void *src, size_t len, uint64_t offset);
-
-    private:
-        int range_check(size_t len, uint64_t offset) const;
-
-        sqlite3_blob* _Nullable blob_ = nullptr;
-        uint64_t                size_ = 0;
-        mutable enum status     status_;
-    };
-
-} // namespace sqlite3pp
-
-#endif
+}
 
 ASSUME_NONNULL_END
+
+#endif
