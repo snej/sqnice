@@ -210,7 +210,7 @@ namespace sqlite3pp {
         /// Executes the statement.
         /// @note  To get the rowid of an INSERT, call `last_insert_rowid`.
         /// @note  To get the number of rows changed, call `changes()`.
-        status execute();
+        status execute()                    {return check(try_execute());}
 
         /// Executes the statement, without throwing exceptions.
         /// This is useful if you want to handle constraint errors.
@@ -234,8 +234,6 @@ namespace sqlite3pp {
         /// Creates a new instance that shares the same underlying `sqlite3_stmt`.
         /// @warning  Do not use the copy after the original `command` is destructed!
         command shared_copy() const;
-
-        [[deprecated]] status execute_all();
 
     private:
         explicit command(database& db)                  :statement(db) { }
@@ -273,7 +271,7 @@ namespace sqlite3pp {
         class row;
 
         /// Runs the query and returns an iterator pointing to the first result row.
-        [[nodiscard]] iterator begin();
+        [[nodiscard]] inline iterator begin();
         /// An empty iterator representing the end of the rows.
         [[nodiscard]] inline iterator end();
 
@@ -344,7 +342,7 @@ namespace sqlite3pp {
         friend class column;
 
         row() = default;
-        explicit row(sqlite3_stmt* stmt);
+        explicit row(sqlite3_stmt* stmt)        :stmt_(stmt) { }
 
         template <std::signed_integral T>
         T get(int idx, T) const {
@@ -367,9 +365,9 @@ namespace sqlite3pp {
         std::string get(int idx, std::string) const;
         std::string_view get(int idx, std::string_view) const;
         void const* get(int idx, void const* _Nullable) const;
-        bool get(int idx, bool) const       {return get_int(idx) != 0;}
+        bool get(int idx, bool) const                   {return get_int(idx) != 0;}
         blob get(int idx, blob) const;
-        null_type get(int idx, null_type) const;
+        null_type get(int idx, null_type) const         {return ignore;}
 
         int get_int(int idx) const;
         int64_t get_int64(int idx) const;
@@ -408,7 +406,7 @@ namespace sqlite3pp {
     /** A sort of input stream over a query row's columns. Each `>>` stores the next value. */
     class query::row::getstream {
     public:
-        getstream(row const* rws, int idx);
+        getstream(row const* rws, int idx)              :rws_(rws), idx_(idx) { }
 
         template <class T>
         getstream& operator >> (T& value) {
@@ -455,9 +453,8 @@ namespace sqlite3pp {
     };
 
 
-    query::iterator query::end() {
-        return iterator();
-    }
+    query::iterator query::begin()                      {return iterator(this);}
+    query::iterator query::end()                        {return iterator();}
 
     template <typename T>
     std::optional<T> query::single_value() {
