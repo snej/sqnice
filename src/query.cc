@@ -25,6 +25,7 @@
 
 #include "sqlite3pp/query.hh"
 #include "sqlite3pp/database.hh"
+#include <cassert>
 
 #ifdef SQLITE3PP_LOADABLE_EXTENSION
 #  include <sqlite3ext.h>
@@ -45,67 +46,66 @@ namespace sqlite3pp {
 #pragma mark - STATEMENT:
 
 
-    statement::statement(database& db, char const* stmt)
-    : checking(db)
-    , stmt_(0)
-    , tail_(0)
+    statement::statement(database& db, std::string_view stmt)
+    : statement(db)
     {
-        if (stmt) {
-            auto rc = prepare(stmt);
-            if (rc != status::ok)
-                throw_(rc);
-        }
+        if (auto rc = prepare_impl(stmt); !ok(rc))
+            throw_(rc);
     }
 
     statement::~statement() {
-        // finish() can return error. If you want to check the error, call
+        // finish() can return an error. If you want to check the error, call
         // finish() explicitly before this object is destructed.
-        finish();
+        (void) finish();
+    }
+
+    status statement::prepare_impl(std::string_view sql) {
+        assert(!stmt_);
+        shared_ = false;
+        const char* tail = nullptr;
+        // TODO: Support SQLITE_PREPARE_PERSISTENT
+        auto rc = status{sqlite3_prepare_v2(db_.db_, sql.data(), int(sql.size()), &stmt_, &tail)};
+        if (ok(rc) && tail != nullptr && tail < sql.data() + sql.size()) {
+            // Multiple statements are not supported.
+            finish_impl(stmt_);
+            stmt_ = nullptr;
+            rc = status::error;
+        }
+        return rc;
+    }
+
+    status statement::prepare(std::string_view sql) {
+        if (auto rc = finish(); !ok(rc))
+            return check(rc);
+        return check(prepare_impl(sql));
     }
 
     int statement::bind_parameter_index(const char* name) const {
         return sqlite3_bind_parameter_index(stmt_, name);
     }
 
-    status statement::prepare(char const* stmt) {
-        auto rc = finish();
-        if (rc != status::ok)
-            return check(rc);
-
-        return check(prepare_impl(stmt));
-    }
-
-    status statement::prepare_impl(char const* stmt) {
-        shared_ = false;
-        return status{sqlite3_prepare_v2(db_.db_, stmt, int(std::strlen(stmt)), &stmt_, &tail_)};
-    }
-
-    void statement::share(const statement& other) {
-        finish();
-        stmt_ = other.stmt_;
-        shared_ = true;
-        clear_bindings();
+    int statement::check_bind_parameter_index(const char* name) const {
+        if (int idx = sqlite3_bind_parameter_index(stmt_, name); idx >= 1 || !exceptions_)
+            return idx;
+        else [[unlikely]]
+            throw std::invalid_argument("unknown binding name");
     }
 
     status statement::finish() {
         auto rc = status::ok;
         if (stmt_) {
-            if (shared_) {
+            if (shared_)
                 reset();
-            } else {
+            else
                 rc = finish_impl(stmt_);
-            }
             stmt_ = nullptr;
         }
-        tail_ = nullptr;
-
         return check(rc);
     }
 
     status statement::finish_impl(sqlite3_stmt* stmt) {
         return status{sqlite3_finalize(stmt)};
     }
-
 
     status statement::step() {
         auto rc = status{sqlite3_step(stmt_)};
@@ -124,16 +124,23 @@ namespace sqlite3pp {
         return check(sqlite3_clear_bindings(stmt_));
     }
 
+    status statement::check_bind(int rc) {
+        if (exceptions_ && rc == SQLITE_RANGE) [[unlikely]]
+            throw std::invalid_argument("bind index out of range");
+        else
+            return check(rc);
+    }
+
     status statement::bind_int(int idx, int value) {
-        return check(sqlite3_bind_int(stmt_, idx, value));
+        return check_bind(sqlite3_bind_int(stmt_, idx, value));
     }
 
     status statement::bind_double(int idx, double value) {
-        return check(sqlite3_bind_double(stmt_, idx, value));
+        return check_bind(sqlite3_bind_double(stmt_, idx, value));
     }
 
     status statement::bind_int64(int idx, int64_t value) {
-        return check(sqlite3_bind_int64(stmt_, idx, value));
+        return check_bind(sqlite3_bind_int64(stmt_, idx, value));
     }
 
     status statement::bind_uint64(int idx, uint64_t value) {
@@ -143,31 +150,33 @@ namespace sqlite3pp {
     }
 
     status statement::bind(int idx, char const* value, copy_semantic fcopy) {
-        return check(sqlite3_bind_text(stmt_, idx, value, int(std::strlen(value)),
+        return check_bind(sqlite3_bind_text(stmt_, idx, value, int(std::strlen(value)),
                                        fcopy == copy ? SQLITE_TRANSIENT : SQLITE_STATIC ));
     }
 
     status statement::bind(int idx, blob value) {
-        return check(sqlite3_bind_blob(stmt_, idx, value.data, int(value.size),
+        return check_bind(sqlite3_bind_blob(stmt_, idx, value.data, int(value.size),
                                        value.fcopy == copy ? SQLITE_TRANSIENT : SQLITE_STATIC ));
     }
 
     status statement::bind(int idx, std::span<const std::byte> value, copy_semantic fcopy) {
-        return check(sqlite3_bind_blob(stmt_, idx, value.data(), int(value.size_bytes()),
+        return check_bind(sqlite3_bind_blob(stmt_, idx, value.data(), int(value.size_bytes()),
                                        fcopy == copy ? SQLITE_TRANSIENT : SQLITE_STATIC ));
     }
 
     status statement::bind(int idx, std::string_view value, copy_semantic fcopy) {
-        return check(sqlite3_bind_text(stmt_, idx, value.data(), int(value.size()),
+        return check_bind(sqlite3_bind_text(stmt_, idx, value.data(), int(value.size()),
                                        fcopy == copy ? SQLITE_TRANSIENT : SQLITE_STATIC ));
     }
 
     status statement::bind(int idx, nullptr_t) {
-        return check(sqlite3_bind_null(stmt_, idx));
+        return check_bind(sqlite3_bind_null(stmt_, idx));
     }
 
     statement::bindref statement::operator[] (char const *name) {
         auto idx = sqlite3_bind_parameter_index(stmt_, name);
+        if (idx < 1 && exceptions_) [[unlikely]]
+            throw std::invalid_argument("unknown binding name");
         return bindref(*this, idx);
     }
 
@@ -178,12 +187,6 @@ namespace sqlite3pp {
 
 #pragma mark - COMMAND:
 
-
-    command command::shared_copy() const {
-        command cmd(db_);
-        cmd.share(*this);
-        return cmd;
-    }
 
     status command::try_execute()  {
         auto rc = step();
@@ -198,21 +201,19 @@ namespace sqlite3pp {
 #pragma mark - QUERY:
 
 
-    query query::shared_copy() const {
-        query q(db_);
-        q.share(*this);
-        return q;
-    }
-
     int query::column_count() const {
         return sqlite3_column_count(stmt_);
     }
 
     char const* query::column_name(int idx) const {
+        if (idx < 0 || idx >= column_count())
+            throw std::domain_error("invalid column index");
         return sqlite3_column_name(stmt_, idx);
     }
 
     char const* query::column_decltype(int idx) const {
+        if (idx < 0 || idx >= column_count())
+            throw std::domain_error("invalid column index");
         return sqlite3_column_decltype(stmt_, idx);
     }
 
@@ -273,6 +274,10 @@ namespace sqlite3pp {
         return getstream(this, idx);
     }
 
+    size_t query::row::column::size_bytes() const {
+        return sqlite3_column_bytes(row_.stmt_, idx_);
+    }
+
     data_type query::row::column::type() const {
         return data_type{sqlite3_column_type(row_.stmt_, idx_)};
     }
@@ -284,10 +289,15 @@ namespace sqlite3pp {
     query::iterator::iterator(query* query)
     : query_(query)
     , rc_ (query->step())
-    , rows_(query_->stmt_)
+    , cur_row_(query_->stmt_)
     {
         if (rc_ != status::row && rc_ != status::done)
             query_->throw_(rc_);
+    }
+
+    query::iterator::~iterator() {
+        if (rc_ != status::done && query_)
+            query_->reset();
     }
 
     query::iterator& query::iterator::operator++() {

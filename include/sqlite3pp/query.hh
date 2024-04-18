@@ -45,8 +45,19 @@ namespace sqlite3pp {
     class database;
     class statement;
 
-    // Declaring a function `sqlite3cpp::bind_helper(statement&, int, T)` allows the type T to be
-    // used in a parameter binding. The function should call statement::bind().
+    /** SQLite's data types. (Values are equal to SQLITE_INT, etc.) */
+    enum class data_type : int {
+        integer         = 1,
+        floating_point  = 2,
+        text            = 3,
+        blob            = 4,
+        null            = 5,
+    };
+
+
+    /** The concept `bindable` identifies custom types that can be bound to statement parameters.
+        Declaring a function `sqlite3cpp::bind_helper(statement&, int, T)` allows the type T to be
+        used in a parameter binding. This function should call statement::bind(). */
     template <typename T>
     concept bindable = requires(statement& stmt, T value) {
         {bind_helper(stmt, 1, value)} -> std::same_as<status>;
@@ -65,7 +76,7 @@ namespace sqlite3pp {
     /** A blob value to bind to a statement parameter. */
     struct blob {
         const void* _Nullable   data  = nullptr;
-        size_t                  size  =  0;
+        size_t                  size  = 0;
         copy_semantic           fcopy = copy;
     };
 
@@ -73,8 +84,18 @@ namespace sqlite3pp {
     /** Abstract base class of `command` and `query`. */
     class statement : public checking, noncopyable {
     public:
+        /// Initializes or replaces the SQL of the statement.
+        status prepare(std::string_view sql);
+
+        /// Tears down the `sqlite3_stmt`. This instance is no longer prepared and can't be used.
+        status finish();
+
+        /// True if the statement contains SQL and can be executed.
+        bool prepared() const                           {return stmt_ != nullptr;}
+        explicit operator bool() const                  {return prepared();}
+
         /// Stops the execution of the statement.
-        /// @note  The does not clear bindings.
+        /// @note  This does not clear bindings.
         status reset();
 
         /// Clears all the parameter bindings to `NULL`.
@@ -90,7 +111,15 @@ namespace sqlite3pp {
         /// Returns a sort of output stream, on which each `<<` binds the next numbered parameter.
         bindstream binder(int idx = 1);
 
+        /// Returns the (1-based) index of a named parameter, or 0 if none exists.
+        int bind_parameter_index(const char* name) const;
+
+        /// Returns the (1-based) index of a named parameter, or throws if none exists.
+        /// @throws std::invalid_argument
+        int check_bind_parameter_index(const char* name) const;
+
         // The following methods bind values to numbered parameters (`?` params start at 1)
+
         status bind(int idx, std::signed_integral auto v) {
             static_assert(sizeof(v) <= 8);
             if constexpr (sizeof(v) <= 4)
@@ -109,7 +138,7 @@ namespace sqlite3pp {
                 return bind_uint64(idx, v);
         }
 
-        status bind(int idx, std::floating_point auto v)        {return bind_double(idx, v);}
+        status bind(int idx, std::floating_point auto v)    {return bind_double(idx, v);}
 
         status bind(int idx, char const* _Nullable value, copy_semantic = copy);
         status bind(int idx, std::string_view value, copy_semantic = copy);
@@ -117,34 +146,31 @@ namespace sqlite3pp {
         status bind(int idx, blob value);
         status bind(int idx, std::span<const std::byte> value, copy_semantic = copy);
 
-        status bind(int idx, null_type)                         {return bind(idx, nullptr);}
+        status bind(int idx, null_type)                     {return bind(idx, nullptr);}
         status bind(int idx, nullptr_t);
 
         template <bindable T>
-        status bind(int idx, T&& v)             {return bind_helper(*this, idx, std::forward<T>(v));}
+        status bind(int idx, T&& v) {
+            return bind_helper(*this, idx, std::forward<T>(v));
+        }
 
         /// Binds a value to a named parameter.
         template <typename T>
-        status bind(char const* name, T&& v)    {return bind(bind_parameter_index(name), std::forward<T>(v));}
-
-        /// Returns the (1-based) index of a named parameter, or 0 if none exists.
-        int bind_parameter_index(const char* name) const;
-
-        /// Can be used to replace the SQL of the statement.
-        status prepare(char const* sql);
-
-        /// Tears down the `sqlite3_stmt`. The statement is no longer prepared and can't be used.
-        status finish();
-
-        /// True if the statement contains SQL and can be executed.
-        bool prepared() const           {return stmt_ != nullptr;}
-        operator bool() const           {return prepared();}
+        status bind(char const* name, T&& v)            {
+            return bind(check_bind_parameter_index(name), std::forward<T>(v));
+        }
 
     protected:
-        explicit statement(database& db, char const* _Nullable stmt = nullptr);
+        explicit statement(database& db)                :checking(db) { }
+        statement(database& db, sqlite3_stmt* stmt)     :checking(db),stmt_(stmt),shared_(!!stmt) {}
+        statement(database& db, std::string_view sql);
         statement(statement&&) = default;
         ~statement();
 
+        status prepare_impl(std::string_view stmt);
+        status finish_impl(sqlite3_stmt* stmt);
+        status check_bind(int rc);
+        status step();
         status bind_int(int idx, int value);
         status bind_int64(int idx, int64_t value);
         status bind_uint64(int idx, uint64_t value);
@@ -157,14 +183,8 @@ namespace sqlite3pp {
                 _bind_args(idx + 1, rest...);
         }
 
-        void share(const statement&);
-        status prepare_impl(char const* stmt);
-        status finish_impl(sqlite3_stmt* stmt);
-        status step();
-
     protected:
-        sqlite3_stmt* _Nullable stmt_;
-        char const* _Nullable   tail_;
+        sqlite3_stmt* _Nullable stmt_ = nullptr;
         bool                    shared_ = false;
     };
 
@@ -172,15 +192,14 @@ namespace sqlite3pp {
     /* A reference to a statement parameter; an implementation detail of statement::operator[]. */
     class statement::bindref : noncopyable {
     public:
-        bindref(statement &stmt, int idx) :stmt_(stmt), idx_(idx) { }
-
         /// Assigning a value to a `bindref` calls `bind` on the `statement`.
+        /// @note  This returns `status`, not `*this`, which is unusual for an assignment operator.
         template <class T>
-        void operator= (const T &value) {
-            if (auto rc = stmt_.bind(idx_, value); rc != status::ok)
-                throw database_error(stmt_.db_, rc);
-        }
+        status operator= (T&& value)              {return stmt_.bind(idx_, std::forward<T>(value));}
+
     private:
+        friend class statement;
+        bindref(statement &stmt, int idx)               :stmt_(stmt), idx_(idx) { }
         statement&  stmt_;
         int const   idx_;
     };
@@ -191,26 +210,29 @@ namespace sqlite3pp {
     /** Produced by `statement::binder()`. Binds one statement parameter for each `<<` call.*/
     class statement::bindstream {
     public:
-        explicit bindstream(statement& stmt, int idx =1)  :stmt_(stmt), idx_(idx) { }
-
         template <class T>
         bindstream& operator << (T&& v)     {stmt_.bind(idx_++, std::forward<T>(v)); return *this;}
 
     private:
+        friend class statement;
+        explicit bindstream(statement& stmt, int idx =1)  :stmt_(stmt), idx_(idx) { }
         statement& stmt_;
         int idx_;
     };
 
 
-    /** A SQL statement other than `SELECT`; i.e. `INSERT`, `UPDATE`, `CREATE`... */
+    /** A SQL statement that does not return rows of results,
+        i.e. `INSERT`, `UPDATE`, `CREATE`... anything other than `SELECT`. */
     class command : public statement {
     public:
-        command(database& db, char const* stmt)         :statement(db, stmt) { }
+        /// Creates a command, compiling the SQL string.
+        /// @throws database_error if the SQL is invalid.
+        command(database& db, std::string_view sql)     :statement(db, sql) { }
 
         /// Executes the statement.
         /// @note  To get the rowid of an INSERT, call `last_insert_rowid`.
-        /// @note  To get the number of rows changed, call `changes()`.
-        status execute()                    {return check(try_execute());}
+        /// @note  To get the number of rows changed, call `changes`.
+        status execute()                                {return check(try_execute());}
 
         /// Executes the statement, without throwing exceptions.
         /// This is useful if you want to handle constraint errors.
@@ -218,12 +240,12 @@ namespace sqlite3pp {
 
         /// Binds parameters to the arguments, then executes the statement.
         template <typename... Args>
-        status execute(Args... args)        {_bind_args(1, args...); return execute();}
+        status execute(Args... args)                    {_bind_args(1, args...); return execute();}
 
         /// Binds parameters to the arguments, then executes the statement,
         /// but without throwing exceptions.
         template <typename... Args>
-        [[nodiscard]] status try_execute(Args... args) {_bind_args(1, args...); return try_execute();}
+        [[nodiscard]] status try_execute(Args... args) {_bind_args(1,args...);return try_execute();}
 
         /// The last rowid inserted by this command, after executing it.
         int64_t last_insert_rowid() const;
@@ -231,40 +253,39 @@ namespace sqlite3pp {
         /// The number of rows changed by this command, after executing it.
         int changes() const;
 
-        /// Creates a new instance that shares the same underlying `sqlite3_stmt`.
-        /// @warning  Do not use the copy after the original `command` is destructed!
-        command shared_copy() const;
-
     private:
+        template <class STMT> friend class statement_cache;
         explicit command(database& db)                  :statement(db) { }
+        command(database& db, sqlite3_stmt* stmt)       :statement(db, stmt) {clear_bindings();}
+        command shared_copy() const                     {return command(db_, stmt_);}
     };
 
 
     /** A `SELECT` statement, whose results can be iterated. */
     class query : public statement {
     public:
-        query(database& db, char const* stmt)       :statement(db, stmt) { }
-
-        /// Creates a new instance that shares the same underlying `sqlite3_stmt`.
-        /// @warning  Do not use the copy after the original `command` is destructed!
-        query shared_copy() const;
+        /// Creates a command, compiling the SQL string.
+        /// @throws database_error if the SQL is invalid.
+        query(database& db, std::string_view sql)       :statement(db, sql) { }
 
         /// Binds its arguments to multiple query parameters starting at index 1.
         template <typename... Args>
         query& operator() (Args... args) & {_bind_args(1, args...); return *this;}
 
         template <typename... Args>
-        [[nodiscard]] query operator() (Args... args) && {
-            _bind_args(1, args...); return std::move(*this);
+        [[nodiscard]] query operator() (Args... args) && {      // (variant avoids dangling ref to
+            _bind_args(1, args...); return std::move(*this);    // rvalue by returning a copy)
         }
 
         /// The number of columns the query will produce.
         int column_count() const;
 
         /// The name of the `idx`'th column.
+        /// @throws std::domain_error if the index is invalid.
         char const* column_name(int idx) const;
 
-        /// The declared type of the `idx`th column in the table's schema. Not generally useful.
+        /// The declared type of the `idx`th column in the table's schema. (Not generally useful.)
+        /// @throws std::domain_error if the index is invalid.
         char const* column_decltype(int idx) const;
 
         class iterator;
@@ -290,25 +311,21 @@ namespace sqlite3pp {
         template <> blob single_value_or(blob const&) = delete;
 
     private:
-        explicit query(database& db)    :statement(db) { }
+        template <class STMT> friend class statement_cache;
+        explicit query(database& db)                    :statement(db) { }
+        query(database& db, sqlite3_stmt* stmt)         :statement(db, stmt) { }
+        query shared_copy() const                       {return query(db_, stmt_);}
     };
 
 
-    // Specializing the struct `column_helper<T>` and adding a static `get(row&, int idx) -> T`
-    // allows a query result value to be converted to type T.
+    /** Specializing the struct `sqlite3pp::column_helper<T>` and adding a static method
+        `get(row&, int idx) -> T` allows a query column value to be converted to type T. */
     template <typename T> struct column_helper{ };
     template <typename T>
+
+    /** The concept `columnable` identifies custom types column values can be converted to. */
     concept columnable = requires(query::row const& row) {
         {column_helper<T>::get(row, 1)} -> std::same_as<T>;
-    };
-
-
-    enum class data_type : int {
-        integer         = 1,
-        floating_point  = 2,
-        text            = 3,
-        blob            = 4,
-        null            = 5,
     };
 
 
@@ -323,13 +340,14 @@ namespace sqlite3pp {
         int column_bytes(int idx) const;
 
         /// Returns the value of the `idx`th column as C++ type `T`.
-        template <class T> T get(int idx) const     {return get(idx, T());}
-
-        template <columnable T> T get(int idx) const  {return column_helper<T>::get(*this, idx);}
+        template <class T> T get(int idx) const         {return get(idx, T());}
+        template <columnable T> T get(int idx) const    {return column_helper<T>::get(*this, idx);}
 
         class column;
+
         /// Returns a lightweight object representing a column. This makes it easy to assign a
-        /// column value to a variable; for example, `int n = row[0];`
+        /// column value to a variable or pass it as a function argument;
+        /// for example: `int n = row[0];` or `sqrt(row[1])`.
         [[nodiscard]] inline column operator[] (int idx) const;
 
         class getstream;
@@ -342,7 +360,7 @@ namespace sqlite3pp {
         friend class column;
 
         row() = default;
-        explicit row(sqlite3_stmt* stmt)        :stmt_(stmt) { }
+        explicit row(sqlite3_stmt* stmt)                :stmt_(stmt) { }
 
         template <std::signed_integral T>
         T get(int idx, T) const {
@@ -382,14 +400,15 @@ namespace sqlite3pp {
     class query::row::column : sqlite3pp::noncopyable {
     public:
         template <typename T>
-        operator T() const          {return row_.get<T>(idx_);}
+        operator T() const                              {return row_.get<T>(idx_);}
 
         /// The length in bytes of a text or blob value.
-        size_t length() const;
+        size_t size_bytes() const;
 
+        /// The data type of the column value.
         data_type type() const;
-        bool is_blob() const        {return type() == data_type::blob;}
-        bool not_null() const       {return type() != data_type::null;}
+        bool not_null() const                           {return type() != data_type::null;}
+        bool is_blob() const                            {return type() == data_type::blob;}
 
     private:
         friend class query::row;
@@ -406,35 +425,37 @@ namespace sqlite3pp {
     /** A sort of input stream over a query row's columns. Each `>>` stores the next value. */
     class query::row::getstream {
     public:
-        getstream(row const* rws, int idx)              :rws_(rws), idx_(idx) { }
-
         template <class T>
         getstream& operator >> (T& value) {
-            value = rws_->get(idx_++, T());
+            value = row_->get(idx_++, T());
             return *this;
         }
 
     private:
-        row const*  rws_;
+        friend class query::row;
+        getstream(row const* rws, int idx)              :row_(rws), idx_(idx) { }
+        row const*  row_;
         int         idx_;
     };
 
 
-    /** Iterator over a query's result rows. */
+    /** Typical C++ iterator over a query's result rows. */
     class query::iterator {
     public:
+        const row& operator*() const                    {return cur_row_;}
+        const row* operator->() const                   {return &cur_row_;}
+
         bool operator==(iterator const& other) const    {return rc_ == other.rc_;}
 
         iterator& operator++();
-
-        const row& operator*() const                    {return rows_;}
-        const row* operator->() const                   {return &rows_;}
 
         /// True if the iterator is valid; false if it's at the end.
         explicit operator bool() const                  {return rc_ != status::done;}
 
         /// A convenience for accessing a column of the current row.
-        row::column operator[] (int idx) const          {return rows_[idx];}
+        row::column operator[] (int idx) const          {return cur_row_[idx];}
+
+        ~iterator();
 
         using iterator_category = std::input_iterator_tag;
         using value_type = row;
@@ -445,11 +466,11 @@ namespace sqlite3pp {
     private:
         friend class query;
         iterator() = default;
-        explicit iterator(query* _Nullable cmd);
+        explicit iterator(query*);
 
-        query* _Nullable  query_  {0};
-        status  rc_     {status::done};
-        row     rows_;
+        query* _Nullable    query_  {0};
+        status              rc_     {status::done};
+        row                 cur_row_;
     };
 
 
@@ -481,20 +502,20 @@ namespace sqlite3pp {
 #pragma mark - STATEMENT CACHE:
 
 
-    /** A cache of pre-compiled `query` or `command` objects. This has three benefits:
-        1. Reusing a compiled statement is faster than compiling a new one.
-        2. If you work around 1 by keeping statement objects around, you have to remember to reset
-           them when done with them, else they hang onto database resources.
-        3. Destructing the cache destructs all the statements automatically.*/
+    /** A cache of pre-compiled `query` or `command` objects. This has several benefits:
+        * Reusing a compiled statement is faster than compiling a new one.
+        * If you work around this by keeping statement objects around, you have to remember
+          to destruct them all before closing the database, else it doesn't close cleanly;
+          destructing the cache destructs all of them at once. */
     template <class STMT>
     class statement_cache {
     public:
-        explicit statement_cache(database &db) :db_(db) { }
+        explicit statement_cache(database &db)          :db_(db) { }
 
         /// Compiles a STMT, or returns a copy of an already-compiled one with the same SQL string.
         /// @warning  If two returned STMTs with the same string are in scope at the same time,
         ///           they won't work right because they are using the same `sqlite3_stmt`.
-        STMT compile(const std::string &sql) {
+        STMT compile(std::string const& sql) {
             const STMT* stmt;
             if (auto i = stmts_.find(sql); i != stmts_.end()) {
                 stmt = &i->second;
@@ -507,15 +528,15 @@ namespace sqlite3pp {
             return stmt->shared_copy();
         }
 
-        STMT operator[] (const std::string &sql)    {return compile(sql);}
-        STMT operator[] (const char *sql)           {return compile(sql);}
+        STMT operator[] (std::string const& sql)        {return compile(std::string(sql));}
+        STMT operator[] (const char *sql)               {return compile(sql);}
 
         /// Empties the cache, freeing all statements.
-        void clear()                                {stmts_.clear();}
+        void clear()                                    {stmts_.clear();}
 
     private:
-        database& db_;
-        std::unordered_map<std::string,STMT> stmts_;
+        database&                               db_;
+        std::unordered_map<std::string,STMT>    stmts_;
     };
 
     /** A cache of pre-compiled `command` objects. */
