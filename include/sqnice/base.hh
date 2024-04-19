@@ -24,7 +24,7 @@
 // THE SOFTWARE.
 
 #pragma once
-#ifndef SQNICE_DBASE_H
+#ifndef SQNICE_BASE_H
 #define SQNICE_BASE_H
 
 #define SQNICE_VERSION "2.0.0"
@@ -53,20 +53,21 @@ namespace sqnice {
 
     /** A SQLite error code. Values are the same as `SQLITE_OK`, `SQLITE_ERROR`, ... */
     enum class status : int {
-        ok          = 0,      corrupt     = 11,
-        error       = 1,      cantopen    = 14,
-        perm        = 3,      constraint  = 19,
-        abort       = 4,      mismatch    = 20,
-        busy        = 5,      misuse      = 21,
-        locked      = 6,      auth        = 23,
-        readonly    = 8,      range       = 25,
-        interrupt   = 9,      row         = 100,
+        ok          =  0,     corrupt     =  11,
+        error       =  1,     cantopen    =  14,
+        perm        =  3,     constraint  =  19,
+        abort       =  4,     mismatch    =  20,
+        busy        =  5,     misuse      =  21,
+        locked      =  6,     auth        =  23,
+        readonly    =  8,     range       =  25,
+        interrupt   =  9,     row         = 100,
         ioerr       = 10,     done        = 101,
     };
 
     /// Masks out other bits set in extended status codes
     inline status basic_status(status s)                    {return status{int(s) & 0xff};}
-    /// True if a `status` is successful (not an error.)
+
+    /// True if a `status` is equal to `status::ok`.
     inline bool ok(status s)                                {return s == status::ok;}
 
 
@@ -97,7 +98,7 @@ namespace sqnice {
 
 
     /** A base class that handles exceptions by throwing or returning an error code.
-     Most of the other classes derive from this. */
+        Most of the other classes derive from this. */
     class checking {
     public:
         /// Enables or disables exceptions.
@@ -108,6 +109,7 @@ namespace sqnice {
         bool exceptions()           {return exceptions_;}
 
         static constexpr bool kExceptionsByDefault = true;
+        
     protected:
         checking(database &db, bool x)              :db_(db), exceptions_(x) { }
         explicit checking(database &db);

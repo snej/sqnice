@@ -23,9 +23,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <cstring>
 
 #include "sqnice/ext.hh"
+#include <sqlite3.h>
+#include <cstring>
 
 namespace sqnice
 {

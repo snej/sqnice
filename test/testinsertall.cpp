@@ -1,6 +1,6 @@
 #include "test.h"
 #include <iostream>
-#include "sqnice.h"
+#include "sqnice/sqnice.hh"
 
 using namespace std;
 

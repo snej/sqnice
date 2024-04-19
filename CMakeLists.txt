@@ -2,12 +2,12 @@ cmake_minimum_required(VERSION 3.9)
 
 project( sqnice
     VERSION     0.1.0
-    DESCRIPTION "A C++ API for SQLite"
+    DESCRIPTION "A nice C++ API for SQLite"
     LANGUAGES   CXX
 )
 
 
-set(CMAKE_CXX_STANDARD          17)
+set(CMAKE_CXX_STANDARD          20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD            11)
 set(CMAKE_C_STANDARD_REQUIRED   ON)
@@ -38,6 +38,7 @@ else()
     else()
         # Clang-specific:
         add_compile_options(
+            -Wno-nullability-extension
             -Wno-gnu-zero-variadic-macro-arguments
             -Wno-gnu-statement-expression-from-macro-expansion
             -Wno-ambiguous-reversed-operator
@@ -47,12 +48,15 @@ endif()
 
 
 add_library( sqnice STATIC
-    src/sqnice.cpp
-    src/sqniceext.cpp
+    src/blob_stream.cc
+    src/database.cc
+    src/ext.cc
+    src/query.cc
+    src/transaction.cc
 )
 
 target_include_directories( sqnice PUBLIC
-    src/
+    include/
 )
 
 target_compile_options( sqnice PRIVATE
@@ -65,7 +69,6 @@ target_compile_options( sqnice PRIVATE
 
 add_executable( sqnice_tests
     test/testaggregate.cpp
-    test/testattach.cpp
     test/testbackup.cpp
     test/testcallback.cpp
     test/testdb.cpp

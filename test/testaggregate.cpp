@@ -1,8 +1,8 @@
 #include "test.h"
 #include <string>
 #include <iostream>
-#include "sqnice.h"
-#include "sqniceext.h"
+#include "sqnice/sqnice.hh"
+#include "sqnice/ext.hh"
 
 using namespace std;
 

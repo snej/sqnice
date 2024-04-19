@@ -174,7 +174,7 @@ namespace sqnice {
                 fprintf(stderr, "**SQLITE WARNING**: A `sqnice::database` object at %p"
                         "is being destructed while there are still open query iterators, blob"
                         " streams or backups. This is bad! (For more information, read the docs for"
-                        "`sqnice::database::close`.)\n", db_);
+                        "`sqnice::database::close`.)\n", (void*)db_);
                 sqlite3_db_config(db_, SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, 1, nullptr);
                 (void) sqlite3_close_v2(db_);
             }

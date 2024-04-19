@@ -32,6 +32,7 @@
 #include "sqnice/base.hh"
 //#include "sqnice/blob_stream.hh"
 #include "sqnice/database.hh"
+//#include "sqnice/ext.hh"
 #include "sqnice/query.hh"
 #include "sqnice/transaction.hh"
 

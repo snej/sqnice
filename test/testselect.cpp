@@ -1,7 +1,7 @@
 #include "test.h"
 #include <string>
 #include <iostream>
-#include "sqnice.h"
+#include "sqnice/sqnice.hh"
 
 using namespace std;
 

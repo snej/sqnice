@@ -23,9 +23,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#pragma once
 #ifndef SQNICEEXT_H
 #define SQNICEEXT_H
 
+#include "sqnice/database.hh"
+#include "sqnice/query.hh"
+#include <sqlite3.h>    //TODO: Remove this dependency
 #include <cstddef>
 #include <map>
 #include <memory>
@@ -33,10 +37,8 @@
 #include <type_traits>
 #include <utility>
 
-#include "sqnice.h"
+namespace sqnice {
 
-namespace sqnice
-{
     namespace {
         template<size_t N>
         struct Apply {

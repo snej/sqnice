@@ -1,6 +1,6 @@
 #include "test.h"
 #include <iostream>
-#include "sqnice.h"
+#include "sqnice/sqnice.hh"
 
 using namespace std;
 
@@ -12,9 +12,9 @@ int main_backup()
 
     db.backup(
       backupdb,
-      [](int pagecount, int remaining, int rc) {
+      [](int pagecount, int remaining, sqnice::status rc) {
         cout << pagecount << "/" << remaining << endl;
-        if (rc == SQLITE_OK || rc == SQLITE_BUSY || rc == SQLITE_LOCKED) {
+        if (rc == sqnice::status::ok || rc == sqnice::status::busy || rc == sqnice::status::locked) {
           // sleep(250);
         }
       });

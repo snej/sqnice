@@ -2,10 +2,12 @@
 #include <exception>
 #include <functional>
 #include <iostream>
-#include "sqnice.h"
+#include "sqnice/sqnice.hh"
 
 using namespace std;
 using namespace std::placeholders;
+
+inline std::ostream& operator<<(std::ostream& out, sqnice::status s) {return out << int(s);}
 
 struct handler
 {
@@ -17,9 +19,9 @@ struct handler
   int cnt_;
 };
 
-int handle_authorize(int evcode, char const* /*p1*/, char const* /*p2*/, char const* /*dbname*/, char const* /*tvname*/) {
+sqnice::status handle_authorize(int evcode, char const* /*p1*/, char const* /*p2*/, char const* /*dbname*/, char const* /*tvname*/) {
   cout << "handle_authorize(" << evcode << ")" << endl;
-  return 0;
+  return sqnice::status::ok;
 }
 
 struct rollback_handler
