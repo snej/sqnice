@@ -100,21 +100,22 @@ namespace sqlite3pp {
     class checking {
     public:
         /// Enables or disables exceptions.
-        /// For a `database`, this defaults to false.
+        /// For a `database`, this defaults to true.
         /// For other objects, it defaults to the value in the `database` they are created from.
         void exceptions(bool x)     {exceptions_ = x;}
         /// True if exceptions are enabled.
         bool exceptions()           {return exceptions_;}
+
+        static constexpr bool kExceptionsByDefault = true;
     protected:
         checking(database &db, bool x)              :db_(db), exceptions_(x) { }
         explicit checking(database &db);
         status check(status rc) const;
         status check(int rc) const                  {return check(status{rc});}
         [[noreturn]] void throw_(status rc) const;
-        [[noreturn]] void throw_(int rc) const      {throw_(status{rc});}
 
         database&   db_;
-        bool        exceptions_ = false;
+        bool        exceptions_ = true;
     };
 
 }

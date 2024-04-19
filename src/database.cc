@@ -27,6 +27,7 @@
 #include "sqlite3pp/query.hh"
 #include <cstring>
 #include <cassert>
+#include <cstdio>
 
 #ifdef SQLITE3PP_LOADABLE_EXTENSION
 #  include <sqlite3ext.h>
@@ -116,35 +117,22 @@ namespace sqlite3pp {
 
 
     database::database(std::string_view dbname, open_flags flags, char const* vfs)
-    : checking(*this, false)
-    , db_(nullptr)
-    , borrowing_(false)
+    : checking(*this, kExceptionsByDefault)
     {
-        if (auto rc = connect(dbname, flags, vfs); rc != status::ok) {
-            std::string message;
-            if (db_) {
-                message = sqlite3_errmsg(db_);
-                sqlite3_close_v2(db_);
-            } else {
-                message = "can't open database";
-            }
-            throw database_error(message.c_str(), rc);
-        }
+        connect(dbname, flags, vfs);
     }
 
-    database::database()
-    : checking(*this, false)
-    , db_(nullptr)
-    , borrowing_(false)
+    database::database() noexcept
+    : checking(*this, kExceptionsByDefault)
     { }
 
-    database::database(sqlite3* pdb)
-    : checking(*this, false)
+    database::database(sqlite3* pdb) noexcept
+    : checking(*this, kExceptionsByDefault)
     , db_(pdb)
     , borrowing_(true)
     { }
 
-    database::database(database&& db) 
+    database::database(database&& db) noexcept
     : checking(*this, db.exceptions_)
     , db_(std::move(db.db_))
     , borrowing_(std::move(db.borrowing_))
@@ -157,7 +145,7 @@ namespace sqlite3pp {
         db.db_ = nullptr;
     }
 
-    database& database::operator=(database&& db) {
+    database& database::operator=(database&& db) noexcept {
         exceptions_ = db.exceptions_;
         db_ = std::move(db.db_);
         db.db_ = nullptr;
@@ -171,35 +159,63 @@ namespace sqlite3pp {
         return *this;
     }
 
-    database::~database() {
-        if (!borrowing_)
-            disconnect();
-    }
-
-    const char* database::filename() const {
-        return sqlite3_db_filename(db_, nullptr);
+    database::~database() noexcept {
+        if (!borrowing_) {
+            if (auto rc = status{sqlite3_close(db_)}; !ok(rc)) {
+                // Closing the database failed: there are still SQLite statements (queries) open,
+                // probably `command` or `query` objects that haven't been destructed yet.
+                // Unfortunately in a destructor, unlike `close()`, we can't throw an exception
+                // to make the operation fail. The best we can do is to call `sqlite3_close_v2`
+                // which will defer the close until the last open handle is gone.
+                // As an additional safeguard, prevent SQLite from checkpointing the WAL when it
+                // does finally close: if this happens after the file has been reopened or deleted,
+                // it can overwrite a mismatched WAL, causing data corruption.
+                fprintf(stderr, "**SQLITE WARNING**: A `sqlite3pp::database` object at %p"
+                        "is being destructed while there are still open query iterators, blob"
+                        " streams or backups. This is bad! (For more information, read the docs for"
+                        "`sqlite3pp::database::close`.)\n", db_);
+                sqlite3_db_config(db_, SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, 1, nullptr);
+                (void) sqlite3_close_v2(db_);
+            }
+        }
     }
 
     status database::connect(std::string_view dbname, open_flags flags, char const* vfs) {
-        if (!borrowing_)
-            disconnect();
-        return check(sqlite3_open_v2(std::string(dbname).c_str(), &db_, int(flags), vfs));
-    }
+        close();
 
-    status database::disconnect() {
-        auto rc = status::ok;
-        if (db_) {
-            rc = status{sqlite3_close(db_)};
-            if (rc == status::ok) {
-                db_ = nullptr;
+        auto rc = status{sqlite3_open_v2(std::string(dbname).c_str(), &db_, int(flags), vfs)};
+        if (!ok(rc)) {
+            if (exceptions_) {
+                std::string message;
+                if (db_) {
+                    message = sqlite3_errmsg(db_);
+                    (void)sqlite3_close_v2(db_);
+                } else {
+                    message = "can't open database";
+                }
+                throw database_error(message.c_str(), rc);
+            } else {
+                (void)sqlite3_close_v2(db_);
             }
+            db_ = nullptr;
         }
         return check(rc);
     }
 
+    status database::close(bool immediately) {
+        if (borrowing_)
+            return status::ok;
+        auto rc = status{immediately ? sqlite3_close(db_) : sqlite3_close_v2(db_)};
+        if (ok(rc))
+            db_ = nullptr;
+        return check(rc);
+    }
 
     status database::execute(std::string_view sql) {
-        return check(sqlite3_exec(db_, std::string(sql).c_str(), nullptr, nullptr, nullptr));
+        auto rc = status{sqlite3_exec(db_, std::string(sql).c_str(), nullptr, nullptr, nullptr)};
+        if (rc == status::error && exceptions_)
+            throw std::invalid_argument(error_msg());
+        return check(rc);
     }
 
     status database::executef(char const* sql, ...) {
@@ -214,6 +230,11 @@ namespace sqlite3pp {
 
 #pragma mark - DATABASE CONFIGURATION:
 
+
+    std::tuple<int,int,int> database::sqlite_version() {
+        auto v = sqlite3_libversion_number();
+        return {v / 1'000'000, v / 1'000, v % 1'000};
+    }
 
     status database::enable_foreign_keys(bool enable) {
         return check(sqlite3_db_config(db_, SQLITE_DBCONFIG_ENABLE_FKEY, enable ? 1 : 0, nullptr));
@@ -276,35 +297,39 @@ namespace sqlite3pp {
 #pragma mark - DATABASE PROPERTIES:
 
 
-    status database::error_code() const {
+    const char* database::filename() const noexcept {
+        return sqlite3_db_filename(db_, nullptr);
+    }
+
+    status database::error_code() const noexcept {
         return status{sqlite3_errcode(db_)};
     }
 
-    status database::extended_error_code() const {
+    status database::extended_error_code() const noexcept {
         return status{sqlite3_extended_errcode(db_)};
     }
 
-    char const* database::error_msg() const {
+    char const* database::error_msg() const noexcept {
         return sqlite3_errmsg(db_);
     }
 
-    bool database::writeable() const {
+    bool database::writeable() const noexcept {
         return ! sqlite3_db_readonly(db_, "main");
     }
 
-    int64_t database::last_insert_rowid() const {
+    int64_t database::last_insert_rowid() const noexcept {
         return sqlite3_last_insert_rowid(db_);
     }
 
-    int database::changes() const {
+    int database::changes() const noexcept {
         return sqlite3_changes(db_);
     }
 
-    int64_t database::total_changes() const {
+    int64_t database::total_changes() const noexcept {
         return sqlite3_total_changes(db_);
     }
 
-    bool database::in_transaction() const {
+    bool database::in_transaction() const noexcept {
         return !sqlite3_get_autocommit(db_);
     }
 
@@ -390,57 +415,69 @@ namespace sqlite3pp {
 
     
     namespace {
-        int busy_handler_impl(void* p, int cnt) {
+        int busy_handler_impl(void* p, int attempts) noexcept {
             auto h = static_cast<database::busy_handler*>(p);
-            return int((*h)(cnt));
+            return (*h)(attempts);
         }
 
-        int commit_hook_impl(void* p) {
+        int commit_hook_impl(void* p) noexcept {
             auto h = static_cast<database::commit_handler*>(p);
             return int((*h)());
         }
 
-        void rollback_hook_impl(void* p) {
+        void rollback_hook_impl(void* p) noexcept {
             auto h = static_cast<database::rollback_handler*>(p);
             (*h)();
         }
 
-        void update_hook_impl(void* p, int opcode, char const* dbname, char const* tablename, long long int rowid) {
+        void update_hook_impl(void* p, int opcode, char const* dbname, char const* tablename,
+                              long long int rowid) noexcept {
             auto h = static_cast<database::update_handler*>(p);
             (*h)(opcode, dbname, tablename, rowid);
         }
 
-        int authorizer_impl(void* p, int evcode, char const* p1, char const* p2, char const* dbname, char const* tvname) {
+        int authorizer_impl(void* p, int action, char const* p1, char const* p2,
+                            char const* dbname, char const* tvname) noexcept {
             auto h = static_cast<database::authorize_handler*>(p);
-            return int((*h)(evcode, p1, p2, dbname, tvname));
+            return int((*h)(action, p1, p2, dbname, tvname));
         }
 
     } // namespace
 
 
+    void database::set_log_handler(log_handler h) {
+        lh_ = h;
+        auto callback = [](void* p, int errCode, const char* msg) noexcept {
+            if ( (errCode & 0xFF) == SQLITE_SCHEMA )
+                return;  // ignore harmless "statement aborts ... database schema has changed"
+            static_cast<database*>(p)->lh_(status(errCode), msg);
+        };
+        sqlite3_config(SQLITE_CONFIG_LOG, (h ? callback : nullptr), this);
+    }
+
     void database::set_busy_handler(busy_handler h) {
         bh_ = h;
-        sqlite3_busy_handler(db_, bh_ ? busy_handler_impl : 0, &bh_);
+        sqlite3_busy_handler(db_, bh_ ? busy_handler_impl : nullptr, &bh_);
     }
 
     void database::set_commit_handler(commit_handler h) {
         ch_ = h;
-        sqlite3_commit_hook(db_, ch_ ? commit_hook_impl : 0, &ch_);
+        sqlite3_commit_hook(db_, ch_ ? commit_hook_impl : nullptr, &ch_);
     }
 
     void database::set_rollback_handler(rollback_handler h) {
         rh_ = h;
-        sqlite3_rollback_hook(db_, rh_ ? rollback_hook_impl : 0, &rh_);
+        sqlite3_rollback_hook(db_, rh_ ? rollback_hook_impl : nullptr, &rh_);
     }
 
     void database::set_update_handler(update_handler h) {
         uh_ = h;
-        sqlite3_update_hook(db_, uh_ ? update_hook_impl : 0, &uh_);
+        sqlite3_update_hook(db_, uh_ ? update_hook_impl : nullptr, &uh_);
     }
 
     void database::set_authorize_handler(authorize_handler h) {
         ah_ = h;
-        sqlite3_set_authorizer(db_, ah_ ? authorizer_impl : 0, &ah_);
+        sqlite3_set_authorizer(db_, ah_ ? authorizer_impl : nullptr, &ah_);
     }
 
 }

@@ -46,11 +46,12 @@ namespace sqlite3pp {
 #pragma mark - STATEMENT:
 
 
-    statement::statement(database& db, std::string_view stmt)
+    statement::statement(database& db, std::string_view stmt, persistence persistence)
     : statement(db)
     {
-        if (auto rc = prepare_impl(stmt); !ok(rc))
-            throw_(rc);
+        exceptions_ = true;
+        prepare_impl(stmt, persistence);
+        exceptions_ = db.exceptions();
     }
 
     statement::~statement() {
@@ -59,25 +60,32 @@ namespace sqlite3pp {
         (void) finish();
     }
 
-    status statement::prepare_impl(std::string_view sql) {
+    status statement::prepare_impl(std::string_view sql, persistence persistence) {
         assert(!stmt_);
         shared_ = false;
         const char* tail = nullptr;
-        // TODO: Support SQLITE_PREPARE_PERSISTENT
-        auto rc = status{sqlite3_prepare_v2(db_.db_, sql.data(), int(sql.size()), &stmt_, &tail)};
+        unsigned flags = (persistence ? SQLITE_PREPARE_PERSISTENT : 0);
+        auto rc = status{sqlite3_prepare_v3(db_.db_, sql.data(), int(sql.size()), flags, &stmt_, &tail)};
         if (ok(rc) && tail != nullptr && tail < sql.data() + sql.size()) {
             // Multiple statements are not supported.
             finish_impl(stmt_);
             stmt_ = nullptr;
+            if (exceptions_)
+                throw std::invalid_argument("multiple SQL statements are not allowed");
             rc = status::error;
+        } else if (rc == status::error && exceptions_) {
+            // Throw a better exception:
+            std::string message(db_.error_msg());
+            message += " in \"" + std::string(sql) + "\"";
+            throw std::invalid_argument(message);
         }
-        return rc;
+        return check(rc);
     }
 
-    status statement::prepare(std::string_view sql) {
+    status statement::prepare(std::string_view sql, persistence persistence) {
         if (auto rc = finish(); !ok(rc))
-            return check(rc);
-        return check(prepare_impl(sql));
+            return rc;
+        return prepare_impl(sql, persistence);
     }
 
     int statement::bind_parameter_index(const char* name) const {

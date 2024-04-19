@@ -85,8 +85,10 @@ namespace sqlite3pp {
     /** Abstract base class of `command` and `query`. */
     class statement : public checking, noncopyable {
     public:
+        enum persistence {nonpersistent, persistent};
+
         /// Initializes or replaces the SQL of the statement.
-        status prepare(std::string_view sql);
+        status prepare(std::string_view sql, persistence = nonpersistent);
 
         /// Tears down the `sqlite3_stmt`. This instance is no longer prepared and can't be used.
         status finish();
@@ -164,11 +166,11 @@ namespace sqlite3pp {
     protected:
         explicit statement(database& db)                :checking(db) { }
         statement(database& db, sqlite3_stmt* stmt)     :checking(db),stmt_(stmt),shared_(!!stmt) {}
-        statement(database& db, std::string_view sql);
+        statement(database& db, std::string_view sql, persistence);
         statement(statement&&) = default;
         ~statement();
 
-        status prepare_impl(std::string_view stmt);
+        status prepare_impl(std::string_view stmt, persistence);
         status finish_impl(sqlite3_stmt* stmt);
         status check_bind(int rc);
         status step();
@@ -228,7 +230,8 @@ namespace sqlite3pp {
     public:
         /// Creates a command, compiling the SQL string.
         /// @throws database_error if the SQL is invalid.
-        command(database& db, std::string_view sql)     :statement(db, sql) { }
+        command(database& db, std::string_view sql, persistence = nonpersistent)
+            :statement(db, sql, persistent) { }
 
         /// Executes the statement.
         /// @note  To get the rowid of an INSERT, call `last_insert_rowid`.
@@ -267,7 +270,8 @@ namespace sqlite3pp {
     public:
         /// Creates a command, compiling the SQL string.
         /// @throws database_error if the SQL is invalid.
-        query(database& db, std::string_view sql)       :statement(db, sql) { }
+        query(database& db, std::string_view sql, persistence = nonpersistent)
+            :statement(db, sql, persistent) { }
 
         /// Binds its arguments to multiple query parameters starting at index 1.
         template <typename... Args>
@@ -521,8 +525,10 @@ namespace sqlite3pp {
             } else {
                 auto x = stmts_.emplace(std::piecewise_construct,
                                         std::tuple<std::string>{sql},
-                                        std::tuple<database&,const char*>{db_, sql.c_str()});
+                                        std::tuple<database&,const char*,statement::persistence>{
+                                                db_, sql.c_str(), statement::persistent});
                 stmt = &x.first->second;
+                assert(stmt);
             }
             return stmt->shared_copy();
         }

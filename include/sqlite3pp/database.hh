@@ -85,49 +85,76 @@ namespace sqlite3pp {
     class database : public checking, noncopyable {
     public:
         /// Constructs an instance that opens a SQLite database file. Details depend on the flags.
+        /// Exceptions are enabled by default! If you want to open a database without potentially
+        /// throwing an exception, use the no-arguments constructor instead, then call
+        /// `exceptions(false)` and then `connect`.
+        /// @throws database_error if the database cannot be opened.
         explicit database(std::string_view filename,
                           open_flags flags           = open_flags::readwrite | open_flags::create,
                           const char*  _Nullable vfs = nullptr);
 
         /// Constructs an instance that uses an already-open SQLite database handle.
-        /// Its destructor will not close this handle.
-        explicit database(sqlite3*);
+        /// Its destructor, and the `close` method, will not close this handle.
+        explicit database(sqlite3*) noexcept;
 
         /// Constructs an instance that isn't connected to any database.
         /// You must call `connect` before doing anything else with it.
-        database();
+        database() noexcept;
 
-        ~database();
-        database(database&& db);
-        database& operator=(database&& db);
+        ~database() noexcept;
+        database(database&& db) noexcept;
+        database& operator=(database&& db) noexcept;
 
         /// Closes any existing connection and opens a new database file.
         status connect(std::string_view filename,
                        open_flags flags           = open_flags::readwrite | open_flags::create,
                        const char*  _Nullable vfs = nullptr);
 
-        /// Closes any existing database connection.
-        status disconnect();
+        /// Closes the database connection. (If there is none, does nothing.)
+        ///
+        /// SQLite cannot close the connection while any `query::iterator` objects are still active,
+        /// `blob_stream`s are open, or backups are running. In this situation, the `immediately`
+        /// parameter comes into play:
+        /// - `immediately==true` (default): The method will return or throw an error status,
+        ///     without closing the connection.
+        /// - `immediately==false`: The method will return `ok` regardless, and the `database`
+        ///     instance is no longer connected; however, SQLite itself keeps the database file
+        ///     open until the last query/blob/backup is closed.
+        ///
+        /// @warning If you are going to delete the database files, **do not pass `false`**.
+        ///     The effects of SQLite having an open connection to a deleted database file can
+        ///     be dangerous, especially if that file is re-created before SQLite closes it;
+        ///     this is one of the known ways to corrupt a SQLite database.
+        status close(bool immediately = true);
 
-        /// The filename (path) of the open database.
-        const char* filename() const;
+        /// The filename (path) of the open database, as passed to the constructor or `connect`.
+        const char* filename() const noexcept;
 
         /// True if the database is writeable, false if read-only.
         /// This depends on the database file's permissions as well as the flags used to open it.
-        bool writeable() const;
+        bool writeable() const noexcept;
 
         /// The raw SQLite database handle, for use if you need to call a SQLite API yourself.
         sqlite3* handle() const                         {return db_;}
 
-        /// Configures the database following current best practices; this is optional,
-        /// and should be the first call after opening a database. It:
+#pragma mark - CONFIGURATION:
+
+        /// Returns the runtime version number of the SQLite library as {major, minor, patch},
+        /// e.g. {3, 43, 1}.
+        static std::tuple<int,int,int> sqlite_version();
+
+        /// Configures the database, according to current best practices.
+        /// This is optional, but recommended. It must be called immedidately after connecting.
+        ///
+        /// It does the following things:
         /// * Enables extended result codes.
         /// * Enables foreign key checks.
         /// * Sets a busy timeout of 5 seconds.
+        ///
         /// If the database is writeable, it also:
-        /// * Enables incremental auto-vacuum mode
         /// * Sets the journal mode to WAL
         /// * Sets the `synchronous` pragma to `normal`
+        /// * Enables incremental auto-vacuum mode
         status setup();
 
         status enable_foreign_keys(bool enable = true);
@@ -144,15 +171,39 @@ namespace sqlite3pp {
         /// @note  For pragmas that return textual results, use `string_pragma`.
         /// @note  For pragmas that return multiple values, like `database-list`,
         ///         you'll have to run your own query.
+        /// @warning NEVER pass an untrusted string; it can enable SQL injection attacks!
         [[nodiscard]] int64_t pragma(const char* name);
 
         /// Executes `PRAGMA name`, returning its value as a string.
+        /// @warning NEVER pass an untrusted string; it can enable SQL injection attacks!
         [[nodiscard]] std::string string_pragma(const char* name);
 
         /// Executes `PRAGMA name = value`.
+        /// @warning NEVER pass an untrusted string; it can enable SQL injection attacks!
         status pragma(const char* name, int64_t value);
         /// Executes `PRAGMA name = value`.
+        /// @warning NEVER pass an untrusted string; it can enable SQL injection attacks!
         status pragma(const char* name, std::string_view value);
+
+#pragma mark - STATUS:
+
+        status error_code() const noexcept;
+        status extended_error_code() const noexcept;
+        char const* _Nullable error_msg() const noexcept;
+
+        /// True if a transaction or savepoint is active.
+        bool in_transaction() const noexcept;
+
+        /// The `rowid` of the last row inserted by an `INSERT` statement.
+        int64_t last_insert_rowid() const noexcept;
+
+        /// The number of rows changed by the last `execute` call or by a `command` object.
+        int changes() const noexcept;
+
+        /// The total number of rows changed since the connection was opened.
+        int64_t total_changes() const noexcept;
+
+#pragma mark - EXECUTING:
 
         /** Executes a (non-`SELECT`) statement, or multiple statements separated by `;`. */
         status execute(std::string_view sql);
@@ -165,33 +216,7 @@ namespace sqlite3pp {
 #endif
         ;
 
-        /// True if a transaction or savepoint is active.
-        bool in_transaction() const;
-
-        /// The `rowid` of the last row inserted by an `INSERT` statement.
-        int64_t last_insert_rowid() const;
-
-        /// The number of rows changed by the last `execute` call or by a `command` object.
-        int changes() const;
-
-        /// The total number of rows changed since the connection was opened.
-        int64_t total_changes() const;
-
-        status error_code() const;
-        status extended_error_code() const;
-        char const* _Nullable error_msg() const;
-
-        using busy_handler = std::function<status (int)>;
-        using commit_handler = std::function<status ()>;
-        using rollback_handler = std::function<void ()>;
-        using update_handler = std::function<void (int, char const*, char const*, long long int)>;
-        using authorize_handler = std::function<status (int, char const*, char const*, char const*, char const*)>;
-
-        void set_busy_handler(busy_handler h);
-        void set_commit_handler(commit_handler h);
-        void set_rollback_handler(rollback_handler h);
-        void set_update_handler(update_handler h);
-        void set_authorize_handler(authorize_handler h);
+#pragma mark - MAINTENANCE
 
         /// Runs `PRAGMA incremental_vacuum(N)`. This causes up to N free pages to be removed from
         /// the database, reducing its file size.
@@ -219,6 +244,29 @@ namespace sqlite3pp {
                       backup_handler h,
                       int step_page = 5);
 
+#pragma mark - CALLBACKS
+
+        // For details, see the SQLite docs for sqlite3_busy_handler(), etc.
+
+        using log_handler = std::function<void (status, const char* message)>;
+        using busy_handler = std::function<bool (int attempts)>;
+        using commit_handler = std::function<bool ()>;
+        using rollback_handler = std::function<void ()>;
+        using update_handler = std::function<void (int op, char const*dbName, char const*tableName,
+                                                   int64_t rowid)>;
+        using authorize_handler = std::function<status (int action,
+                                                        char const* _Nullable arg1,
+                                                        char const* _Nullable arg2,
+                                                        char const* _Nullable dbName,
+                                                        char const* _Nullable triggerOrView)>;
+
+        void set_log_handler(log_handler);
+        void set_busy_handler(busy_handler);
+        void set_commit_handler(commit_handler);
+        void set_rollback_handler(rollback_handler);
+        void set_update_handler(update_handler);
+        void set_authorize_handler(authorize_handler);
+
     private:
         friend class statement;
         friend class database_error;
@@ -228,8 +276,9 @@ namespace sqlite3pp {
         friend database ext::borrow(sqlite3* pdb);
 
     private:
-        sqlite3* _Nullable  db_;
-        bool                borrowing_;
+        sqlite3* _Nullable  db_ = nullptr;
+        bool                borrowing_ = false;
+        log_handler         lh_;
         busy_handler        bh_;
         commit_handler      ch_;
         rollback_handler    rh_;
