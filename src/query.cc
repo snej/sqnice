@@ -274,11 +274,11 @@ namespace sqlite3pp {
         return getstream(this, idx);
     }
 
-    size_t query::row::column::size_bytes() const {
+    size_t column_value::size_bytes() const {
         return sqlite3_column_bytes(row_.stmt_, idx_);
     }
 
-    data_type query::row::column::type() const {
+    data_type column_value::type() const {
         return data_type{sqlite3_column_type(row_.stmt_, idx_)};
     }
 

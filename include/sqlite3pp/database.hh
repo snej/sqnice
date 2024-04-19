@@ -70,6 +70,7 @@ namespace sqlite3pp {
     inline open_flags operator- (open_flags a, open_flags b) {return open_flags(int(a) & ~int(b));}
     inline open_flags& operator|= (open_flags& a, open_flags b) {a = a | b; return a;}
 
+
     /** Per-database size/quantity limits that can be adjusted. */
     enum class limit : int {
         row_length      =  0,
@@ -83,41 +84,78 @@ namespace sqlite3pp {
     /** A SQLite database connection. */
     class database : public checking, noncopyable {
     public:
-        explicit database(char const* dbname,
+        /// Constructs an instance that opens a SQLite database file. Details depend on the flags.
+        explicit database(std::string_view filename,
                           open_flags flags           = open_flags::readwrite | open_flags::create,
                           const char*  _Nullable vfs = nullptr);
+
+        /// Constructs an instance that uses an already-open SQLite database handle.
+        /// Its destructor will not close this handle.
+        explicit database(sqlite3*);
+
+        /// Constructs an instance that isn't connected to any database.
+        /// You must call `connect` before doing anything else with it.
+        database();
 
         ~database();
         database(database&& db);
         database& operator=(database&& db);
 
-        status connect(char const* dbname,
+        /// Closes any existing connection and opens a new database file.
+        status connect(std::string_view filename,
                        open_flags flags           = open_flags::readwrite | open_flags::create,
                        const char*  _Nullable vfs = nullptr);
+
+        /// Closes any existing database connection.
         status disconnect();
 
-        status attach(char const* dbname, char const* name);
-        status detach(char const* name);
-
+        /// The filename (path) of the open database.
         const char* filename() const;
 
-        sqlite3* handle() const         {return db_;}
+        /// True if the database is writeable, false if read-only.
+        /// This depends on the database file's permissions as well as the flags used to open it.
+        bool writeable() const;
 
-        int64_t last_insert_rowid() const;
+        /// The raw SQLite database handle, for use if you need to call a SQLite API yourself.
+        sqlite3* handle() const                         {return db_;}
+
+        /// Configures the database following current best practices; this is optional,
+        /// and should be the first call after opening a database. It:
+        /// * Enables extended result codes.
+        /// * Enables foreign key checks.
+        /// * Sets a busy timeout of 5 seconds.
+        /// If the database is writeable, it also:
+        /// * Enables incremental auto-vacuum mode
+        /// * Sets the journal mode to WAL
+        /// * Sets the `synchronous` pragma to `normal`
+        status setup();
 
         status enable_foreign_keys(bool enable = true);
         status enable_triggers(bool enable = true);
         status enable_extended_result_codes(bool enable = true);
+        status set_busy_timeout(int ms);
 
-        int changes() const;
-        int64_t total_changes() const;
+        /// Returns the current value of a limit. (See the `limits` enum.)
+        unsigned get_limit(limit) const;
+        /// Sets the value of a limit, returning the previous value.
+        unsigned set_limit(limit, unsigned);
 
-        status error_code() const;
-        status extended_error_code() const;
-        char const* _Nullable error_msg() const;
+        /// Executes `PRAGMA name`, returning its value as an int.
+        /// @note  For pragmas that return textual results, use `string_pragma`.
+        /// @note  For pragmas that return multiple values, like `database-list`,
+        ///         you'll have to run your own query.
+        [[nodiscard]] int64_t pragma(const char* name);
+
+        /// Executes `PRAGMA name`, returning its value as a string.
+        [[nodiscard]] std::string string_pragma(const char* name);
+
+        /// Executes `PRAGMA name = value`.
+        status pragma(const char* name, int64_t value);
+        /// Executes `PRAGMA name = value`.
+        status pragma(const char* name, std::string_view value);
 
         /** Executes a (non-`SELECT`) statement, or multiple statements separated by `;`. */
-        status execute(char const* sql);
+        status execute(std::string_view sql);
 
         /** Same as `execute` but uses `printf`-style formatting to produce the SQL string.
             @warning If using `%s`, be **very careful** not to introduce SQL injection attacks! */
@@ -127,7 +165,21 @@ namespace sqlite3pp {
 #endif
         ;
 
-        status set_busy_timeout(int ms);
+        /// True if a transaction or savepoint is active.
+        bool in_transaction() const;
+
+        /// The `rowid` of the last row inserted by an `INSERT` statement.
+        int64_t last_insert_rowid() const;
+
+        /// The number of rows changed by the last `execute` call or by a `command` object.
+        int changes() const;
+
+        /// The total number of rows changed since the connection was opened.
+        int64_t total_changes() const;
+
+        status error_code() const;
+        status extended_error_code() const;
+        char const* _Nullable error_msg() const;
 
         using busy_handler = std::function<status (int)>;
         using commit_handler = std::function<status ()>;
@@ -141,15 +193,31 @@ namespace sqlite3pp {
         void set_update_handler(update_handler h);
         void set_authorize_handler(authorize_handler h);
 
+        /// Runs `PRAGMA incremental_vacuum(N)`. This causes up to N free pages to be removed from
+        /// the database, reducing its file size.
+        /// @param always  If false, the operation is only performed if the size of the freelist is
+        ///                either 25% of the database or 10MB, whichever is less.
+        ///                If true, vacuuming always occurs, and as a bonus, the WAL is truncated
+        ///                to save even more disk space.
+        /// @param nPages  The maximum number of pages to free; or if 0, unlimited.
+        /// @returns  The number of pages freed, or `nullopt` if no vacuuming took place.
+        /// @note Has no effect if the database is not in `auto_vacuum=incremental` mode,
+        ///       or if it's not writeable.
+        /// @note See <https://blogs.gnome.org/jnelson/2015/01/06/sqlite-vacuum-and-auto_vacuum/>
+        std::optional<int64_t> incremental_vacuum(bool always = true, int64_t nPages = 0);
+
+        /// Runs `PRAGMA optimize`. This "is usually a no-op but it will occasionally run ANALYZE
+        /// if it seems like doing so will be useful to the query planner."
+        status optimize();
+
         using backup_handler = std::function<void (int, int, status)>;
 
         status backup(database& destdb, backup_handler h = {});
-        status backup(char const* dbname, database& destdb, char const* destdbname, backup_handler h, int step_page = 5);
-
-        bool in_transaction() const;
-
-        unsigned get_limit(limit) const;
-        unsigned set_limit(limit, unsigned);
+        status backup(std::string_view dbname,
+                      database& destdb,
+                      std::string_view destdbname,
+                      backup_handler h,
+                      int step_page = 5);
 
     private:
         friend class statement;
@@ -158,8 +226,6 @@ namespace sqlite3pp {
         friend class ext::function;
         friend class ext::aggregate;
         friend database ext::borrow(sqlite3* pdb);
-
-        database(sqlite3* pdb);
 
     private:
         sqlite3* _Nullable  db_;

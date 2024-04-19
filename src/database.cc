@@ -24,6 +24,7 @@
 
 
 #include "sqlite3pp/database.hh"
+#include "sqlite3pp/query.hh"
 #include <cstring>
 #include <cassert>
 
@@ -114,12 +115,11 @@ namespace sqlite3pp {
 #pragma mark - DATABASE:
 
 
-    database::database(char const* dbname, open_flags flags, char const* vfs)
+    database::database(std::string_view dbname, open_flags flags, char const* vfs)
     : checking(*this, false)
     , db_(nullptr)
     , borrowing_(false)
     {
-        assert(dbname);
         if (auto rc = connect(dbname, flags, vfs); rc != status::ok) {
             std::string message;
             if (db_) {
@@ -131,6 +131,12 @@ namespace sqlite3pp {
             throw database_error(message.c_str(), rc);
         }
     }
+
+    database::database()
+    : checking(*this, false)
+    , db_(nullptr)
+    , borrowing_(false)
+    { }
 
     database::database(sqlite3* pdb)
     : checking(*this, false)
@@ -166,19 +172,18 @@ namespace sqlite3pp {
     }
 
     database::~database() {
-        if (!borrowing_) {
+        if (!borrowing_)
             disconnect();
-        }
     }
 
     const char* database::filename() const {
         return sqlite3_db_filename(db_, nullptr);
     }
 
-    status database::connect(char const* dbname, open_flags flags, char const* vfs) {
+    status database::connect(std::string_view dbname, open_flags flags, char const* vfs) {
         if (!borrowing_)
             disconnect();
-        return check(sqlite3_open_v2(dbname, &db_, int(flags), vfs));
+        return check(sqlite3_open_v2(std::string(dbname).c_str(), &db_, int(flags), vfs));
     }
 
     status database::disconnect() {
@@ -189,41 +194,12 @@ namespace sqlite3pp {
                 db_ = nullptr;
             }
         }
-
-        return check(rc);
-    }
-
-    status database::attach(char const* dbname, char const* name) {
-        return executef("ATTACH '%q' AS '%q'", dbname, name);
-    }
-
-    status database::detach(char const* name) {
-        return executef("DETACH '%q'", name);
-    }
-
-    status database::backup(database& destdb, backup_handler h) {
-        return backup("main", destdb, "main", h);
-    }
-
-    status database::backup(char const* dbname, database& destdb, char const* destdbname, backup_handler h, int step_page) {
-        sqlite3_backup* bkup = sqlite3_backup_init(destdb.db_, destdbname, db_, dbname);
-        if (!bkup) {
-            return error_code();
-        }
-        auto rc = status::ok;
-        do {
-            rc = status{sqlite3_backup_step(bkup, step_page)};
-            if (h) {
-                h(sqlite3_backup_remaining(bkup), sqlite3_backup_pagecount(bkup), rc);
-            }
-        } while (rc == status::ok || rc == status::busy || rc == status::locked);
-        sqlite3_backup_finish(bkup);
         return check(rc);
     }
 
 
-    status database::execute(char const* sql) {
-        return check(sqlite3_exec(db_, sql, 0, 0, 0));
+    status database::execute(std::string_view sql) {
+        return check(sqlite3_exec(db_, std::string(sql).c_str(), nullptr, nullptr, nullptr));
     }
 
     status database::executef(char const* sql, ...) {
@@ -255,6 +231,39 @@ namespace sqlite3pp {
         return check(sqlite3_busy_timeout(db_, ms));
     }
 
+
+    status database::setup() {
+        status rc = enable_extended_result_codes(true);
+        if (!ok(rc)) {return rc;}
+        rc = enable_foreign_keys();
+        if (!ok(rc)) {return rc;}
+        rc = set_busy_timeout(5000);
+        if (ok(rc) && writeable()) {
+            rc = execute("PRAGMA auto_vacuum = incremental;" // must be the first statement executed
+                         "PRAGMA journal_mode = WAL;"
+                         "PRAGMA synchronous=normal");
+        }
+        return rc;
+    }
+
+
+    int64_t database::pragma(const char* pragma) {
+        return query(*this, std::string("PRAGMA \"") + pragma + "\"").single_value_or<int>(0);
+    }
+
+    std::string database:: string_pragma(const char* pragma) {
+        return query(*this, std::string("PRAGMA \"") + pragma + "\"").single_value_or<std::string>("");
+    }
+
+    status database::pragma(const char* pragma, int64_t value) {
+        return executef("PRAGMA %s(%d)", pragma, value);
+    }
+
+    status database::pragma(const char* pragma, std::string_view value) {
+        return executef("PRAGMA %s(%q)", pragma, std::string(value).c_str());
+    }
+
+
     unsigned database::get_limit(limit lim) const {
         return sqlite3_limit(db_, int(lim), -1);
     }
@@ -279,6 +288,10 @@ namespace sqlite3pp {
         return sqlite3_errmsg(db_);
     }
 
+    bool database::writeable() const {
+        return ! sqlite3_db_readonly(db_, "main");
+    }
+
     int64_t database::last_insert_rowid() const {
         return sqlite3_last_insert_rowid(db_);
     }
@@ -294,6 +307,83 @@ namespace sqlite3pp {
     bool database::in_transaction() const {
         return !sqlite3_get_autocommit(db_);
     }
+
+
+#pragma mark - BACKUP:
+
+
+    status database::backup(database& destdb, backup_handler h) {
+        return backup("main", destdb, "main", h);
+    }
+
+    status database::backup(std::string_view dbname,
+                            database& destdb, std::string_view destdbname,
+                            backup_handler h, int step_page)
+    {
+        sqlite3_backup* bkup = sqlite3_backup_init(destdb.db_,
+                                                   std::string(destdbname).c_str(),
+                                                   db_,
+                                                   std::string(dbname).c_str());
+        if (!bkup) {
+            return error_code();
+        }
+        auto rc = status::ok;
+        do {
+            rc = status{sqlite3_backup_step(bkup, step_page)};
+            if (h) {
+                h(sqlite3_backup_remaining(bkup), sqlite3_backup_pagecount(bkup), rc);
+            }
+        } while (rc == status::ok || rc == status::busy || rc == status::locked);
+        sqlite3_backup_finish(bkup);
+        return check(rc);
+    }
+
+
+    status database::optimize() {
+        /* "The optimize pragma is usually a no-op but it will occasionally run ANALYZE if it
+         seems like doing so will be useful to the query planner. The analysis_limit pragma
+         limits the scope of any ANALYZE command that the optimize pragma runs so that it does
+         not consume too many CPU cycles. The constant "400" can be adjusted as needed. Values
+         between 100 and 1000 work well for most applications."
+         -- <https://sqlite.org/lang_analyze.html> */
+        if (!writeable())
+            return status::ok;
+        status rc = pragma("analysis_limit", 400);
+        if (ok(rc))
+            rc = pragma("optimize", 0xfffe);
+        return rc;
+    }
+
+
+    // If this fraction of the database is composed of free pages, vacuum it on close
+    static constexpr float kVacuumFractionThreshold = 0.25;
+    // If the database has many bytes of free space, vacuum it on close
+    static constexpr int64_t kVacuumSizeThreshold = 10'000'000;
+
+
+    std::optional<int64_t> database::incremental_vacuum(bool always, int64_t nPages) {
+        // <https://blogs.gnome.org/jnelson/2015/01/06/sqlite-vacuum-and-auto_vacuum/>
+        if (!writeable())
+            return std::nullopt;
+        int64_t pageCount = pragma("page_count");
+        bool do_it = always;
+        if (!always) {
+            int64_t freePages = pragma("freelist_count");
+            float freeFraction = pageCount ? (float)freePages / pageCount : 0;
+            do_it = freeFraction >= kVacuumFractionThreshold
+                    || freePages * pragma("page_size") >= kVacuumSizeThreshold;
+        }
+        if (!do_it)
+            return std::nullopt;
+
+        pragma("incremental_vacuum", nPages);
+        if (always) {
+            // On explicit compact, truncate the WAL file to save more disk space:
+            pragma("wal_checkpoint", "TRUNCATE");
+        }
+        return pageCount - pragma("page_count");
+    }
+
 
 
 #pragma mark - HOOKS:

@@ -44,6 +44,7 @@ struct sqlite3_stmt;
 namespace sqlite3pp {
     class database;
     class statement;
+    class column_value;
 
     /** SQLite's data types. (Values are equal to SQLITE_INT, etc.) */
     enum class data_type : int {
@@ -343,12 +344,10 @@ namespace sqlite3pp {
         template <class T> T get(int idx) const         {return get(idx, T());}
         template <columnable T> T get(int idx) const    {return column_helper<T>::get(*this, idx);}
 
-        class column;
-
         /// Returns a lightweight object representing a column. This makes it easy to assign a
         /// column value to a variable or pass it as a function argument;
         /// for example: `int n = row[0];` or `sqrt(row[1])`.
-        [[nodiscard]] inline column operator[] (int idx) const;
+        [[nodiscard]] inline column_value operator[] (int idx) const;
 
         class getstream;
         /// Returns a sort of input stream from which columns can be read using `>>`.
@@ -357,7 +356,7 @@ namespace sqlite3pp {
     private:
         friend class query;
         friend class query::iterator;
-        friend class column;
+        friend class column_value;
 
         row() = default;
         explicit row(sqlite3_stmt* stmt)                :stmt_(stmt) { }
@@ -397,7 +396,7 @@ namespace sqlite3pp {
 
 
     /** Represents a single column of a query row; returned by `query::row[]`. */
-    class query::row::column : sqlite3pp::noncopyable {
+    class column_value : sqlite3pp::noncopyable {
     public:
         template <typename T>
         operator T() const                              {return row_.get<T>(idx_);}
@@ -412,13 +411,13 @@ namespace sqlite3pp {
 
     private:
         friend class query::row;
-        column(query::row r, int idx) noexcept :row_(r), idx_(idx) { }
+        column_value(query::row r, int idx) noexcept :row_(r), idx_(idx) { }
 
         query::row const    row_;
         int const           idx_;
     };
 
-    query::row::column query::row::operator[] (int idx) const   {return column(*this, idx);}
+    column_value query::row::operator[] (int idx) const   {return column_value(*this, idx);}
 
 
 
@@ -453,7 +452,7 @@ namespace sqlite3pp {
         explicit operator bool() const                  {return rc_ != status::done;}
 
         /// A convenience for accessing a column of the current row.
-        row::column operator[] (int idx) const          {return cur_row_[idx];}
+        column_value operator[] (int idx) const         {return cur_row_[idx];}
 
         ~iterator();
 
