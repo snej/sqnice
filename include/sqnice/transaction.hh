@@ -1,8 +1,9 @@
-// sqlite3pp/transaction.hh
+// sqnice/transaction.hh
 //
 // The MIT License
 //
 // Copyright (c) 2015 Wongoo Lee (iwongu at gmail dot com)
+// Copyright (c) 2024 Jens Alfke (Github: snej)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,14 +24,14 @@
 // THE SOFTWARE.
 
 #pragma once
-#ifndef SQLITE3PP_TRANSACTION_H
-#define SQLITE3PP_TRANSACTION_H
+#ifndef SQNICE_TRANSACTION_H
+#define SQNICE_TRANSACTION_H
 
-#include "sqlite3pp/base.hh"
+#include "sqnice/base.hh"
 
 ASSUME_NONNULL_BEGIN
 
-namespace sqlite3pp {
+namespace sqnice {
     class database;
 
     /** An RAII wrapper around SQLite's `BEGIN` and `COMMIT`/`ROLLBACK` commands.
@@ -49,8 +50,8 @@ namespace sqlite3pp {
         explicit transaction(database& db,
                              bool autocommit = false,
                              bool immediate = true);
-        transaction(transaction&&);
-        ~transaction();
+        transaction(transaction&&) noexcept;
+        ~transaction() noexcept;
 
         /// Commits the transaction.
         status commit();
@@ -72,8 +73,8 @@ namespace sqlite3pp {
         ///     the destructor runs. Not recommended because destructors should not throw
         ///     exceptions, so you won't know if it succeeded or not.
         explicit savepoint(database& db, bool autocommit = false);
-        savepoint(savepoint&&);
-        ~savepoint();
+        savepoint(savepoint&&) noexcept;
+        ~savepoint() noexcept;
 
         /// Commits the savepoint.
         /// @note  Changes made in a nested savepoint are not actually persisted until

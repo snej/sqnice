@@ -1,21 +1,21 @@
 #include "test.h"
 #include <iostream>
-#include "sqlite3pp.h"
+#include "sqnice.h"
 
 using namespace std;
 
 int main_attach()
 {
   try {
-    sqlite3pp::database db("foods.db");
+    sqnice::database db("foods.db");
 
     db.attach("test.db", "test");
     {
-      sqlite3pp::transaction xct(db);
+      sqnice::transaction xct(db);
       {
-	sqlite3pp::query qry(db, "SELECT epi.* FROM episodes epi, test.contacts con WHERE epi.id = con.id");
+	sqnice::query qry(db, "SELECT epi.* FROM episodes epi, test.contacts con WHERE epi.id = con.id");
 
-	for (sqlite3pp::query::iterator i = qry.begin(); i != qry.end(); ++i) {
+	for (sqnice::query::iterator i = qry.begin(); i != qry.end(); ++i) {
 	  for (int j = 0; j < qry.column_count(); ++j) {
 	    cout << (*i).get<char const*>(j) << "\t";
 	  }

@@ -1,8 +1,9 @@
-// sqlite3pp/database.cc
+// sqnice/database.cc
 //
 // The MIT License
 //
 // Copyright (c) 2015 Wongoo Lee (iwongu at gmail dot com)
+// Copyright (c) 2024 Jens Alfke (Github: snej)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,17 +24,17 @@
 // THE SOFTWARE.
 
 
-#include "sqlite3pp/transaction.hh"
-#include "sqlite3pp/database.hh"
+#include "sqnice/transaction.hh"
+#include "sqnice/database.hh"
 
-#ifdef SQLITE3PP_LOADABLE_EXTENSION
+#ifdef SQNICE_LOADABLE_EXTENSION
 #  include <sqlite3ext.h>
 SQLITE_EXTENSION_INIT1
 #else
 #  include <sqlite3.h>
 #endif
 
-namespace sqlite3pp {
+namespace sqnice {
 
     transaction::transaction(database& db, bool auto_commit, bool immediate)
     : checking(db)
@@ -45,7 +46,7 @@ namespace sqlite3pp {
             throw_(rc);
     }
 
-    transaction::transaction(transaction &&t)
+    transaction::transaction(transaction &&t) noexcept
     : checking(std::move(t))
     , active_(t.active_)
     , autocommit_(t.autocommit_)
@@ -54,11 +55,8 @@ namespace sqlite3pp {
     }
 
 
-    transaction::~transaction() {
+    transaction::~transaction() noexcept {
         if (active_) {
-            // execute() can return error. If you want to check the error,
-            // call commit() or rollback() explicitly before this object is
-            // destructed.
             exceptions(false);
             (void)db_.execute(autocommit_ ? "COMMIT" : "ROLLBACK");
         }
@@ -85,7 +83,7 @@ namespace sqlite3pp {
             throw_(rc);
     }
 
-    savepoint::savepoint(savepoint &&s)
+    savepoint::savepoint(savepoint &&s) noexcept
     : checking(std::move(s))
     , active_(s.active_)
     , autocommit_(s.autocommit_)
@@ -93,11 +91,8 @@ namespace sqlite3pp {
         s.active_ = false;
     }
 
-    savepoint::~savepoint() {
+    savepoint::~savepoint() noexcept {
         if (active_) {
-            // execute() can return error. If you want to check the error,
-            // call commit() or rollback() explicitly before this object is
-            // destructed.
             exceptions(false);
             execute(autocommit_ ? "RELEASE" : "ROLLBACK TO");
         }

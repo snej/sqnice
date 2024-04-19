@@ -1,8 +1,9 @@
-// sqlite3pp/database.cc
+// sqnice/database.cc
 //
 // The MIT License
 //
 // Copyright (c) 2015 Wongoo Lee (iwongu at gmail dot com)
+// Copyright (c) 2024 Jens Alfke (Github: snej)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,20 +24,20 @@
 // THE SOFTWARE.
 
 
-#include "sqlite3pp/database.hh"
-#include "sqlite3pp/query.hh"
+#include "sqnice/database.hh"
+#include "sqnice/query.hh"
 #include <cstring>
 #include <cassert>
 #include <cstdio>
 
-#ifdef SQLITE3PP_LOADABLE_EXTENSION
+#ifdef SQNICE_LOADABLE_EXTENSION
 #  include <sqlite3ext.h>
 SQLITE_EXTENSION_INIT1
 #else
 #  include <sqlite3.h>
 #endif
 
-namespace sqlite3pp {
+namespace sqnice {
 
     static_assert(int(status::ok)               == SQLITE_OK);
     static_assert(int(status::error)            == SQLITE_ERROR);
@@ -170,10 +171,10 @@ namespace sqlite3pp {
                 // As an additional safeguard, prevent SQLite from checkpointing the WAL when it
                 // does finally close: if this happens after the file has been reopened or deleted,
                 // it can overwrite a mismatched WAL, causing data corruption.
-                fprintf(stderr, "**SQLITE WARNING**: A `sqlite3pp::database` object at %p"
+                fprintf(stderr, "**SQLITE WARNING**: A `sqnice::database` object at %p"
                         "is being destructed while there are still open query iterators, blob"
                         " streams or backups. This is bad! (For more information, read the docs for"
-                        "`sqlite3pp::database::close`.)\n", db_);
+                        "`sqnice::database::close`.)\n", db_);
                 sqlite3_db_config(db_, SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, 1, nullptr);
                 (void) sqlite3_close_v2(db_);
             }
@@ -231,7 +232,7 @@ namespace sqlite3pp {
 #pragma mark - DATABASE CONFIGURATION:
 
 
-    std::tuple<int,int,int> database::sqlite_version() {
+    std::tuple<int,int,int> database::sqlite_version() noexcept {
         auto v = sqlite3_libversion_number();
         return {v / 1'000'000, v / 1'000, v % 1'000};
     }
@@ -285,11 +286,11 @@ namespace sqlite3pp {
     }
 
 
-    unsigned database::get_limit(limit lim) const {
+    unsigned database::get_limit(limit lim) const noexcept {
         return sqlite3_limit(db_, int(lim), -1);
     }
 
-    unsigned database::set_limit(limit lim, unsigned val) {
+    unsigned database::set_limit(limit lim, unsigned val) noexcept {
         return sqlite3_limit(db_, int(lim), int(val));
     }
 
@@ -445,7 +446,7 @@ namespace sqlite3pp {
     } // namespace
 
 
-    void database::set_log_handler(log_handler h) {
+    void database::set_log_handler(log_handler h) noexcept {
         lh_ = h;
         auto callback = [](void* p, int errCode, const char* msg) noexcept {
             if ( (errCode & 0xFF) == SQLITE_SCHEMA )
@@ -455,27 +456,27 @@ namespace sqlite3pp {
         sqlite3_config(SQLITE_CONFIG_LOG, (h ? callback : nullptr), this);
     }
 
-    void database::set_busy_handler(busy_handler h) {
+    void database::set_busy_handler(busy_handler h) noexcept {
         bh_ = h;
         sqlite3_busy_handler(db_, bh_ ? busy_handler_impl : nullptr, &bh_);
     }
 
-    void database::set_commit_handler(commit_handler h) {
+    void database::set_commit_handler(commit_handler h) noexcept {
         ch_ = h;
         sqlite3_commit_hook(db_, ch_ ? commit_hook_impl : nullptr, &ch_);
     }
 
-    void database::set_rollback_handler(rollback_handler h) {
+    void database::set_rollback_handler(rollback_handler h) noexcept {
         rh_ = h;
         sqlite3_rollback_hook(db_, rh_ ? rollback_hook_impl : nullptr, &rh_);
     }
 
-    void database::set_update_handler(update_handler h) {
+    void database::set_update_handler(update_handler h) noexcept {
         uh_ = h;
         sqlite3_update_hook(db_, uh_ ? update_hook_impl : nullptr, &uh_);
     }
 
-    void database::set_authorize_handler(authorize_handler h) {
+    void database::set_authorize_handler(authorize_handler h) noexcept {
         ah_ = h;
         sqlite3_set_authorizer(db_, ah_ ? authorizer_impl : nullptr, &ah_);
     }

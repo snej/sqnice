@@ -1,8 +1,9 @@
-// sqlite3pp/database.cc
+// sqnice/database.cc
 //
 // The MIT License
 //
 // Copyright (c) 2015 Wongoo Lee (iwongu at gmail dot com)
+// Copyright (c) 2024 Jens Alfke (Github: snej)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,17 +24,17 @@
 // THE SOFTWARE.
 
 
-#include "sqlite3pp/blob_stream.hh"
-#include "sqlite3pp/database.hh"
+#include "sqnice/blob_stream.hh"
+#include "sqnice/database.hh"
 
-#ifdef SQLITE3PP_LOADABLE_EXTENSION
+#ifdef SQNICE_LOADABLE_EXTENSION
 #  include <sqlite3ext.h>
 SQLITE_EXTENSION_INIT1
 #else
 #  include <sqlite3.h>
 #endif
 
-namespace sqlite3pp {
+namespace sqnice {
 
     blob_stream::blob_stream(database& db,
                              const char *database,
@@ -47,7 +48,7 @@ namespace sqlite3pp {
     }
 
 
-    blob_stream::~blob_stream() {
+    blob_stream::~blob_stream() noexcept {
         if (blob_)
             sqlite3_blob_close(blob_);
     }

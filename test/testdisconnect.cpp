@@ -1,17 +1,17 @@
 #include "test.h"
 #include <iostream>
-#include "sqlite3pp.h"
+#include "sqnice.h"
 
 using namespace std;
 
 int main_disconnect()
 {
   try {
-    sqlite3pp::database db("test.db");
+    sqnice::database db("test.db");
     {
-      sqlite3pp::transaction xct(db);
+      sqnice::transaction xct(db);
       {
-	sqlite3pp::command cmd(db, "INSERT INTO contacts (name, phone) VALUES ('AAAA', '1234')");
+	sqnice::command cmd(db, "INSERT INTO contacts (name, phone) VALUES ('AAAA', '1234')");
 
 	cout << cmd.execute() << endl;
       }

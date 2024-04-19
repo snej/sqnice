@@ -1,8 +1,8 @@
 #include "test.h"
 #include <string>
 #include <iostream>
-#include "sqlite3pp.h"
-#include "sqlite3ppext.h"
+#include "sqnice.h"
+#include "sqniceext.h"
 
 using namespace std;
 
@@ -11,18 +11,18 @@ int test0()
   return 100;
 }
 
-void test1(sqlite3pp::ext::context& ctx)
+void test1(sqnice::ext::context& ctx)
 {
   ctx.result(200);
 }
 
-void test2(sqlite3pp::ext::context& ctx)
+void test2(sqnice::ext::context& ctx)
 {
   std::string args = ctx.get<std::string>(0);
   ctx.result(args);
 }
 
-void test3(sqlite3pp::ext::context& ctx)
+void test3(sqnice::ext::context& ctx)
 {
   ctx.result_copy(0);
 }
@@ -40,9 +40,9 @@ std::string test6(std::string const& s1, std::string const& s2, std::string cons
 int main_function()
 {
   try {
-    sqlite3pp::database db("test.db");
+    sqnice::database db("test.db");
 
-    sqlite3pp::ext::function func(db);
+    sqnice::ext::function func(db);
     cout << func.create<int ()>("h0", &test0) << endl;
     cout << func.create("h1", &test1) << endl;
     cout << func.create("h2", &test2, 1) << endl;
@@ -51,14 +51,14 @@ int main_function()
     cout << func.create<int (int)>("h5", [](int i){return i + 1000;}) << endl;
     cout << func.create<string (string, string, string)>("h6", &test6) << endl;
 
-    sqlite3pp::query qry(db, "SELECT h0(), h1(), h2('x'), h3('y'), h4(), h5(10), h6('a', 'b', 'c')");
+    sqnice::query qry(db, "SELECT h0(), h1(), h2('x'), h3('y'), h4(), h5(10), h6('a', 'b', 'c')");
 
     for (int i = 0; i < qry.column_count(); ++i) {
       cout << qry.column_name(i) << "\t";
     }
     cout << endl;
 
-    for (sqlite3pp::query::iterator i = qry.begin(); i != qry.end(); ++i) {
+    for (sqnice::query::iterator i = qry.begin(); i != qry.end(); ++i) {
       for (int j = 0; j < qry.column_count(); ++j) {
 	cout << (*i).get<char const*>(j) << "\t";
       }

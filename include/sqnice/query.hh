@@ -1,8 +1,9 @@
-// sqlite3pp/database.hh
+// sqnice/database.hh
 //
 // The MIT License
 //
 // Copyright (c) 2015 Wongoo Lee (iwongu at gmail dot com)
+// Copyright (c) 2024 Jens Alfke (Github: snej)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,10 +24,10 @@
 // THE SOFTWARE.
 
 #pragma once
-#ifndef SQLITE3PP_QUERY_H
-#define SQLITE3PP_QUERY_H
+#ifndef SQNICE_QUERY_H
+#define SQNICE_QUERY_H
 
-#include "sqlite3pp/base.hh"
+#include "sqnice/base.hh"
 #include <concepts>
 #include <cstddef>
 #include <iterator>
@@ -41,7 +42,7 @@ ASSUME_NONNULL_BEGIN
 
 struct sqlite3_stmt;
 
-namespace sqlite3pp {
+namespace sqnice {
     class database;
     class statement;
     class column_value;
@@ -164,16 +165,16 @@ namespace sqlite3pp {
         }
 
     protected:
-        explicit statement(database& db)                :checking(db) { }
-        statement(database& db, sqlite3_stmt* stmt)     :checking(db),stmt_(stmt),shared_(!!stmt) {}
+        explicit statement(database& db) noexcept       :checking(db) { }
+        statement(database& db, sqlite3_stmt* stmt) noexcept :checking(db),stmt_(stmt),shared_(!!stmt) {}
         statement(database& db, std::string_view sql, persistence);
         statement(statement&&) = default;
-        ~statement();
+        ~statement() noexcept;
 
         status prepare_impl(std::string_view stmt, persistence);
         status finish_impl(sqlite3_stmt* stmt);
         status check_bind(int rc);
-        status step();
+        status step() noexcept;
         status bind_int(int idx, int value);
         status bind_int64(int idx, int64_t value);
         status bind_uint64(int idx, uint64_t value);
@@ -202,7 +203,7 @@ namespace sqlite3pp {
 
     private:
         friend class statement;
-        bindref(statement &stmt, int idx)               :stmt_(stmt), idx_(idx) { }
+        bindref(statement &stmt, int idx) noexcept      :stmt_(stmt), idx_(idx) { }
         statement&  stmt_;
         int const   idx_;
     };
@@ -218,7 +219,7 @@ namespace sqlite3pp {
 
     private:
         friend class statement;
-        explicit bindstream(statement& stmt, int idx =1)  :stmt_(stmt), idx_(idx) { }
+        explicit bindstream(statement& stmt, int idx =1) noexcept :stmt_(stmt), idx_(idx) { }
         statement& stmt_;
         int idx_;
     };
@@ -240,7 +241,7 @@ namespace sqlite3pp {
 
         /// Executes the statement, without throwing exceptions.
         /// This is useful if you want to handle constraint errors.
-        [[nodiscard]] status try_execute();
+        [[nodiscard]] status try_execute() noexcept;
 
         /// Binds parameters to the arguments, then executes the statement.
         template <typename... Args>
@@ -249,19 +250,22 @@ namespace sqlite3pp {
         /// Binds parameters to the arguments, then executes the statement,
         /// but without throwing exceptions.
         template <typename... Args>
-        [[nodiscard]] status try_execute(Args... args) {_bind_args(1,args...);return try_execute();}
+        [[nodiscard]] status try_execute(Args... args) noexcept {
+            _bind_args(1,args...);
+            return try_execute();
+        }
 
         /// The last rowid inserted by this command, after executing it.
-        int64_t last_insert_rowid() const;
+        int64_t last_insert_rowid() const noexcept;
 
         /// The number of rows changed by this command, after executing it.
-        int changes() const;
+        int changes() const noexcept;
 
     private:
         template <class STMT> friend class statement_cache;
-        explicit command(database& db)                  :statement(db) { }
-        command(database& db, sqlite3_stmt* stmt)       :statement(db, stmt) {clear_bindings();}
-        command shared_copy() const                     {return command(db_, stmt_);}
+        explicit command(database& db) noexcept              :statement(db) { }
+        command(database& db, sqlite3_stmt* stmt) noexcept   :statement(db, stmt) {clear_bindings();}
+        command shared_copy() const noexcept                 {return command(db_, stmt_);}
     };
 
 
@@ -283,7 +287,7 @@ namespace sqlite3pp {
         }
 
         /// The number of columns the query will produce.
-        int column_count() const;
+        int column_count() const noexcept;
 
         /// The name of the `idx`'th column.
         /// @throws std::domain_error if the index is invalid.
@@ -299,7 +303,7 @@ namespace sqlite3pp {
         /// Runs the query and returns an iterator pointing to the first result row.
         [[nodiscard]] inline iterator begin();
         /// An empty iterator representing the end of the rows.
-        [[nodiscard]] inline iterator end();
+        [[nodiscard]] inline iterator end() noexcept;
 
         /// A convenience method that runs the query and returns the value of the first row's
         /// first column. If there are no rows, returns `std::nullopt`.
@@ -317,13 +321,13 @@ namespace sqlite3pp {
 
     private:
         template <class STMT> friend class statement_cache;
-        explicit query(database& db)                    :statement(db) { }
-        query(database& db, sqlite3_stmt* stmt)         :statement(db, stmt) { }
-        query shared_copy() const                       {return query(db_, stmt_);}
+        explicit query(database& db) noexcept               :statement(db) { }
+        query(database& db, sqlite3_stmt* stmt) noexcept    :statement(db, stmt) { }
+        query shared_copy() const noexcept                  {return query(db_, stmt_);}
     };
 
 
-    /** Specializing the struct `sqlite3pp::column_helper<T>` and adding a static method
+    /** Specializing the struct `sqnice::column_helper<T>` and adding a static method
         `get(row&, int idx) -> T` allows a query column value to be converted to type T. */
     template <typename T> struct column_helper{ };
     template <typename T>
@@ -339,10 +343,10 @@ namespace sqlite3pp {
     class query::row {
     public:
         /// The number of columns in the row. (Same as `query::column_count`.)
-        int column_count() const;
+        int column_count() const noexcept;
 
         /// The length in bytes of a BLOB or a UTF-8 TEXT value.
-        int column_bytes(int idx) const;
+        int column_bytes(int idx) const noexcept;
 
         /// Returns the value of the `idx`th column as C++ type `T`.
         template <class T> T get(int idx) const         {return get(idx, T());}
@@ -355,7 +359,7 @@ namespace sqlite3pp {
 
         class getstream;
         /// Returns a sort of input stream from which columns can be read using `>>`.
-        getstream getter(int idx = 0) const;
+        getstream getter(int idx = 0) const noexcept;
 
     private:
         friend class query;
@@ -363,7 +367,7 @@ namespace sqlite3pp {
         friend class column_value;
 
         row() = default;
-        explicit row(sqlite3_stmt* stmt)                :stmt_(stmt) { }
+        explicit row(sqlite3_stmt* stmt) noexcept       :stmt_(stmt) { }
 
         template <std::signed_integral T>
         T get(int idx, T) const {
@@ -381,18 +385,18 @@ namespace sqlite3pp {
                 return static_cast<T>(get_int64(idx));
         }
 
-        double get(int idx, double) const;
-        char const* get(int idx, char const* _Nullable) const;
-        std::string get(int idx, std::string) const;
-        std::string_view get(int idx, std::string_view) const;
-        void const* get(int idx, void const* _Nullable) const;
-        bool get(int idx, bool) const                   {return get_int(idx) != 0;}
-        blob get(int idx, blob) const;
+        double get(int idx, double) const noexcept;
+        char const* get(int idx, char const* _Nullable) const noexcept;
+        std::string get(int idx, std::string) const noexcept;
+        std::string_view get(int idx, std::string_view) const noexcept;
+        void const* get(int idx, void const* _Nullable) const noexcept;
+        bool get(int idx, bool) const noexcept          {return get_int(idx) != 0;}
+        blob get(int idx, blob) const noexcept;
         null_type get(int idx, null_type) const         {return ignore;}
 
-        int get_int(int idx) const;
-        int64_t get_int64(int idx) const;
-        double get_double(int idx) const;
+        int get_int(int idx) const noexcept;
+        int64_t get_int64(int idx) const noexcept;
+        double get_double(int idx) const noexcept;
 
     private:
         sqlite3_stmt* _Nullable stmt_ = nullptr;
@@ -400,18 +404,18 @@ namespace sqlite3pp {
 
 
     /** Represents a single column of a query row; returned by `query::row[]`. */
-    class column_value : sqlite3pp::noncopyable {
+    class column_value : sqnice::noncopyable {
     public:
         template <typename T>
         operator T() const                              {return row_.get<T>(idx_);}
 
         /// The length in bytes of a text or blob value.
-        size_t size_bytes() const;
+        size_t size_bytes() const noexcept;
 
         /// The data type of the column value.
-        data_type type() const;
-        bool not_null() const                           {return type() != data_type::null;}
-        bool is_blob() const                            {return type() == data_type::blob;}
+        data_type type() const noexcept;
+        bool not_null() const noexcept                  {return type() != data_type::null;}
+        bool is_blob() const noexcept                   {return type() == data_type::blob;}
 
     private:
         friend class query::row;
@@ -436,7 +440,7 @@ namespace sqlite3pp {
 
     private:
         friend class query::row;
-        getstream(row const* rws, int idx)              :row_(rws), idx_(idx) { }
+        getstream(row const* rws, int idx) noexcept     :row_(rws), idx_(idx) { }
         row const*  row_;
         int         idx_;
     };
@@ -445,20 +449,20 @@ namespace sqlite3pp {
     /** Typical C++ iterator over a query's result rows. */
     class query::iterator {
     public:
-        const row& operator*() const                    {return cur_row_;}
-        const row* operator->() const                   {return &cur_row_;}
+        const row& operator*() const noexcept           {return cur_row_;}
+        const row* operator->() const noexcept          {return &cur_row_;}
 
-        bool operator==(iterator const& other) const    {return rc_ == other.rc_;}
+        bool operator==(iterator const& other) const noexcept    {return rc_ == other.rc_;}
 
         iterator& operator++();
 
         /// True if the iterator is valid; false if it's at the end.
-        explicit operator bool() const                  {return rc_ != status::done;}
+        explicit operator bool() const noexcept         {return rc_ != status::done;}
 
         /// A convenience for accessing a column of the current row.
         column_value operator[] (int idx) const         {return cur_row_[idx];}
 
-        ~iterator();
+        ~iterator() noexcept;
 
         using iterator_category = std::input_iterator_tag;
         using value_type = row;
@@ -478,7 +482,7 @@ namespace sqlite3pp {
 
 
     query::iterator query::begin()                      {return iterator(this);}
-    query::iterator query::end()                        {return iterator();}
+    query::iterator query::end() noexcept               {return iterator();}
 
     template <typename T>
     std::optional<T> query::single_value() {
@@ -513,7 +517,7 @@ namespace sqlite3pp {
     template <class STMT>
     class statement_cache {
     public:
-        explicit statement_cache(database &db)          :db_(db) { }
+        explicit statement_cache(database &db) noexcept :db_(db) { }
 
         /// Compiles a STMT, or returns a copy of an already-compiled one with the same SQL string.
         /// @warning  If two returned STMTs with the same string are in scope at the same time,

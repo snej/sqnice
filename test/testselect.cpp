@@ -1,26 +1,26 @@
 #include "test.h"
 #include <string>
 #include <iostream>
-#include "sqlite3pp.h"
+#include "sqnice.h"
 
 using namespace std;
 
 int main_select()
 {
   try {
-    sqlite3pp::database db("test.db");
+    sqnice::database db("test.db");
 
-    sqlite3pp::transaction xct(db, true);
+    sqnice::transaction xct(db, true);
 
     {
-      sqlite3pp::query qry(db, "SELECT id, name, phone FROM contacts");
+      sqnice::query qry(db, "SELECT id, name, phone FROM contacts");
 
       for (int i = 0; i < qry.column_count(); ++i) {
 	cout << qry.column_name(i) << "\t";
       }
       cout << endl;
 
-      for (sqlite3pp::query::iterator i = qry.begin(); i != qry.end(); ++i) {
+      for (sqnice::query::iterator i = qry.begin(); i != qry.end(); ++i) {
 	for (int j = 0; j < qry.column_count(); ++j) {
 	  cout << (*i).get<char const*>(j) << "\t";
 	}
@@ -30,7 +30,7 @@ int main_select()
 
       qry.reset();
 
-      for (sqlite3pp::query::iterator i = qry.begin(); i != qry.end(); ++i) {
+      for (sqnice::query::iterator i = qry.begin(); i != qry.end(); ++i) {
 	int id;
 	char const* name, *phone;
 	std::tie(id, name, phone) = (*i).get_columns<int, char const*, char const*>(0, 1, 2);
@@ -40,10 +40,10 @@ int main_select()
 
       qry.reset();
 
-      for (sqlite3pp::query::iterator i = qry.begin(); i != qry.end(); ++i) {
+      for (sqnice::query::iterator i = qry.begin(); i != qry.end(); ++i) {
 	int id = 0;
 	std::string name, phone;
-	(*i).getter() >> sqlite3pp::ignore >> name >> phone;
+	(*i).getter() >> sqnice::ignore >> name >> phone;
 	cout << id << "\t" << name << "\t" << phone << endl;
       }
     }

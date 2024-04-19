@@ -1,8 +1,9 @@
-// sqlite3pp/blob_stream.hh
+// sqnice/blob_stream.hh
 //
 // The MIT License
 //
 // Copyright (c) 2015 Wongoo Lee (iwongu at gmail dot com)
+// Copyright (c) 2024 Jens Alfke (Github: snej)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,16 +24,16 @@
 // THE SOFTWARE.
 
 #pragma once
-#ifndef SQLITE3PP_BLOB_STREAM_H
-#define SQLITE3PP_BLOB_STREAM_H
+#ifndef SQNICE_BLOB_STREAM_H
+#define SQNICE_BLOB_STREAM_H
 
-#include "sqlite3pp/base.hh"
+#include "sqnice/base.hh"
 
 ASSUME_NONNULL_BEGIN
 
 struct sqlite3_blob;
 
-namespace sqlite3pp {
+namespace sqnice {
     class database;
 
     /** Random access to the data in a blob. */
@@ -58,15 +59,15 @@ namespace sqlite3pp {
                     int64_t rowid,
                     bool writeable);
 
-        ~blob_stream();
+        ~blob_stream() noexcept;
 
         /// The status of the last operation: opening the blob handle, or the last read.
         /// @note  If exceptions are enabled,
-        status status() const               {return status_;}
+        status status() const noexcept                  {return status_;}
 
         /// The size in bytes of the blob.
         /// @note  This API uses `int` internally so blobs are limited to 2^31 bytes (~2GB.)
-        uint64_t size() const               {return size_;}
+        uint64_t size() const noexcept                  {return size_;}
 
         /// Reads from the blob.
         /// @note  It is not an error to read past the end of the blob; the read will be truncated

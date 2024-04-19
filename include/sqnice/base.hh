@@ -1,8 +1,9 @@
-// sqlite3pp/base.hh
+// sqnice/base.hh
 //
 // The MIT License
 //
 // Copyright (c) 2015 Wongoo Lee (iwongu at gmail dot com)
+// Copyright (c) 2024 Jens Alfke (Github: snej)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,13 +24,13 @@
 // THE SOFTWARE.
 
 #pragma once
-#ifndef SQLITE3PP_DBASE_H
-#define SQLITE3PP_BASE_H
+#ifndef SQNICE_DBASE_H
+#define SQNICE_BASE_H
 
-#define SQLITE3PP_VERSION "2.0.0"
-#define SQLITE3PP_VERSION_MAJOR 2
-#define SQLITE3PP_VERSION_MINOR 0
-#define SQLITE3PP_VERSION_PATCH 0
+#define SQNICE_VERSION "2.0.0"
+#define SQNICE_VERSION_MAJOR 2
+#define SQNICE_VERSION_MINOR 0
+#define SQNICE_VERSION_PATCH 0
 
 #include <stdexcept>
 
@@ -47,7 +48,7 @@
 
 ASSUME_NONNULL_BEGIN
 
-namespace sqlite3pp {
+namespace sqnice {
     class database;
 
     /** A SQLite error code. Values are the same as `SQLITE_OK`, `SQLITE_ERROR`, ... */
@@ -115,7 +116,7 @@ namespace sqlite3pp {
         [[noreturn]] void throw_(status rc) const;
 
         database&   db_;
-        bool        exceptions_ = true;
+        bool        exceptions_;
     };
 
 }

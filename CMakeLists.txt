@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.9)
 
-project( sqlite3pp
+project( sqnice
     VERSION     0.1.0
     DESCRIPTION "A C++ API for SQLite"
     LANGUAGES   CXX
@@ -46,16 +46,16 @@ else()
 endif()
 
 
-add_library( sqlite3pp STATIC
-    src/sqlite3pp.cpp
-    src/sqlite3ppext.cpp
+add_library( sqnice STATIC
+    src/sqnice.cpp
+    src/sqniceext.cpp
 )
 
-target_include_directories( sqlite3pp PUBLIC
+target_include_directories( sqnice PUBLIC
     src/
 )
 
-target_compile_options( sqlite3pp PRIVATE
+target_compile_options( sqnice PRIVATE
     -Wno-deprecated-declarations
 )
 
@@ -63,7 +63,7 @@ target_compile_options( sqlite3pp PRIVATE
 #### TESTS
 
 
-add_executable( sqlite3pp_tests
+add_executable( sqnice_tests
     test/testaggregate.cpp
     test/testattach.cpp
     test/testbackup.cpp
@@ -76,12 +76,12 @@ add_executable( sqlite3pp_tests
     test/testselect.cpp
 )
 
-target_compile_options( sqlite3pp_tests PRIVATE
+target_compile_options( sqnice_tests PRIVATE
     -Wno-deprecated-declarations
 )
 
-target_link_libraries( sqlite3pp_tests
-    sqlite3pp
+target_link_libraries( sqnice_tests
+    sqnice
     sqlite3
 )
 

@@ -1,25 +1,25 @@
 #include "test.h"
 #include <iostream>
-#include "sqlite3pp.h"
+#include "sqnice.h"
 
 using namespace std;
 
 int main_insert()
 {
   try {
-    sqlite3pp::database db("test.db");
+    sqnice::database db("test.db");
 
     {
       db.execute("INSERT INTO contacts (name, phone) VALUES ('AAAA', '1234')");
     }
 
     {
-      sqlite3pp::transaction xct(db);
+      sqnice::transaction xct(db);
 
-      sqlite3pp::command cmd(db, "INSERT INTO contacts (name, phone) VALUES (?, ?)");
+      sqnice::command cmd(db, "INSERT INTO contacts (name, phone) VALUES (?, ?)");
 
-      cout << cmd.bind(1, "BBBB", sqlite3pp::copy) << endl;
-      cout << cmd.bind(2, "1234", sqlite3pp::copy) << endl;
+      cout << cmd.bind(1, "BBBB", sqnice::copy) << endl;
+      cout << cmd.bind(2, "1234", sqnice::copy) << endl;
       cout << cmd.execute() << endl;
 
       cout << cmd.reset() << endl;
@@ -32,11 +32,11 @@ int main_insert()
     }
 
     {
-      sqlite3pp::transaction xct(db, true);
+      sqnice::transaction xct(db, true);
 
-      sqlite3pp::command cmd(db, "INSERT INTO contacts (name, phone) VALUES (:name, :name)");
+      sqnice::command cmd(db, "INSERT INTO contacts (name, phone) VALUES (:name, :name)");
 
-      cout << cmd.bind(":name", "DDDD", sqlite3pp::copy) << endl;
+      cout << cmd.bind(":name", "DDDD", sqnice::copy) << endl;
 
       cout << cmd.execute() << endl;
     }

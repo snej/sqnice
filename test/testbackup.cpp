@@ -1,14 +1,14 @@
 #include "test.h"
 #include <iostream>
-#include "sqlite3pp.h"
+#include "sqnice.h"
 
 using namespace std;
 
 int main_backup()
 {
   try {
-    sqlite3pp::database db("test.db");
-    sqlite3pp::database backupdb("backup.db");
+    sqnice::database db("test.db");
+    sqnice::database backupdb("backup.db");
 
     db.backup(
       backupdb,

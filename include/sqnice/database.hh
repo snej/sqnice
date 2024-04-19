@@ -1,8 +1,9 @@
-// sqlite3pp/database.hh
+// sqnice/database.hh
 //
 // The MIT License
 //
 // Copyright (c) 2015 Wongoo Lee (iwongu at gmail dot com)
+// Copyright (c) 2024 Jens Alfke (Github: snej)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,21 +24,21 @@
 // THE SOFTWARE.
 
 #pragma once
-#ifndef SQLITE3PP_DATABASE_H
-#define SQLITE3PP_DATABASE_H
+#ifndef SQNICE_DATABASE_H
+#define SQNICE_DATABASE_H
 
-#include "sqlite3pp/base.hh"
+#include "sqnice/base.hh"
 #include <functional>
 
 ASSUME_NONNULL_BEGIN
 
 struct sqlite3;
 
-namespace sqlite3pp {
+namespace sqnice {
 
     class database;
 
-    // Defined in sqlite3ppext.hh
+    // Defined in sqniceext.hh
     namespace ext {
         class function;
         class aggregate;
@@ -141,7 +142,7 @@ namespace sqlite3pp {
 
         /// Returns the runtime version number of the SQLite library as {major, minor, patch},
         /// e.g. {3, 43, 1}.
-        static std::tuple<int,int,int> sqlite_version();
+        static std::tuple<int,int,int> sqlite_version() noexcept;
 
         /// Configures the database, according to current best practices.
         /// This is optional, but recommended. It must be called immedidately after connecting.
@@ -163,9 +164,9 @@ namespace sqlite3pp {
         status set_busy_timeout(int ms);
 
         /// Returns the current value of a limit. (See the `limits` enum.)
-        unsigned get_limit(limit) const;
+        unsigned get_limit(limit) const noexcept;
         /// Sets the value of a limit, returning the previous value.
-        unsigned set_limit(limit, unsigned);
+        unsigned set_limit(limit, unsigned) noexcept;
 
         /// Executes `PRAGMA name`, returning its value as an int.
         /// @note  For pragmas that return textual results, use `string_pragma`.
@@ -211,7 +212,7 @@ namespace sqlite3pp {
         /** Same as `execute` but uses `printf`-style formatting to produce the SQL string.
             @warning If using `%s`, be **very careful** not to introduce SQL injection attacks! */
         status executef(char const* sql, ...)
-#ifdef SQLITE3PP_TYPECHECK_EXECUTEF
+#ifdef SQNICE_TYPECHECK_EXECUTEF
                                                 __attribute__((__format__ (__printf__, 2, 3)))
 #endif
         ;
@@ -260,12 +261,12 @@ namespace sqlite3pp {
                                                         char const* _Nullable dbName,
                                                         char const* _Nullable triggerOrView)>;
 
-        void set_log_handler(log_handler);
-        void set_busy_handler(busy_handler);
-        void set_commit_handler(commit_handler);
-        void set_rollback_handler(rollback_handler);
-        void set_update_handler(update_handler);
-        void set_authorize_handler(authorize_handler);
+        void set_log_handler(log_handler) noexcept;
+        void set_busy_handler(busy_handler) noexcept;
+        void set_commit_handler(commit_handler) noexcept;
+        void set_rollback_handler(rollback_handler) noexcept;
+        void set_update_handler(update_handler) noexcept;
+        void set_authorize_handler(authorize_handler) noexcept;
 
     private:
         friend class statement;

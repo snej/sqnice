@@ -1,23 +1,23 @@
 #include "test.h"
 #include <iostream>
-#include "sqlite3pp.h"
+#include "sqnice.h"
 
 using namespace std;
 
 int main_insertall()
 {
   try {
-    sqlite3pp::database db("test.db");
+    sqnice::database db("test.db");
     {
-      sqlite3pp::transaction xct(db);
+      sqnice::transaction xct(db);
       {
-	sqlite3pp::command cmd(db,
+	sqnice::command cmd(db,
 			       "INSERT INTO contacts (name, phone) VALUES (:name, '1234');"
 			       "INSERT INTO contacts (name, phone) VALUES (:name, '5678');"
 			       "INSERT INTO contacts (name, phone) VALUES (:name, '9012');"
 			       );
 	{
-	  cout << cmd.bind(":name", "user", sqlite3pp::copy) << endl;
+	  cout << cmd.bind(":name", "user", sqnice::copy) << endl;
 	  cout << cmd.execute_all() << endl;
 	}
       }

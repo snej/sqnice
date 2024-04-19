@@ -1,8 +1,9 @@
-// sqlite3pp/database.cc
+// sqnice/database.cc
 //
 // The MIT License
 //
 // Copyright (c) 2015 Wongoo Lee (iwongu at gmail dot com)
+// Copyright (c) 2024 Jens Alfke (Github: snej)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,18 +24,18 @@
 // THE SOFTWARE.
 
 
-#include "sqlite3pp/query.hh"
-#include "sqlite3pp/database.hh"
+#include "sqnice/query.hh"
+#include "sqnice/database.hh"
 #include <cassert>
 
-#ifdef SQLITE3PP_LOADABLE_EXTENSION
+#ifdef SQNICE_LOADABLE_EXTENSION
 #  include <sqlite3ext.h>
 SQLITE_EXTENSION_INIT1
 #else
 #  include <sqlite3.h>
 #endif
 
-namespace sqlite3pp {
+namespace sqnice {
 
     static_assert(int(data_type::integer)       == SQLITE_INTEGER);
     static_assert(int(data_type::floating_point)== SQLITE_FLOAT);
@@ -54,7 +55,7 @@ namespace sqlite3pp {
         exceptions_ = db.exceptions();
     }
 
-    statement::~statement() {
+    statement::~statement() noexcept {
         // finish() can return an error. If you want to check the error, call
         // finish() explicitly before this object is destructed.
         (void) finish();
@@ -115,11 +116,8 @@ namespace sqlite3pp {
         return status{sqlite3_finalize(stmt)};
     }
 
-    status statement::step() {
-        auto rc = status{sqlite3_step(stmt_)};
-        if (rc != status::done && rc != status::row)
-            check(rc);
-        return rc;
+    status statement::step() noexcept {
+        return status{sqlite3_step(stmt_)};
     }
 
     status statement::reset() {
@@ -196,20 +194,20 @@ namespace sqlite3pp {
 #pragma mark - COMMAND:
 
 
-    status command::try_execute()  {
+    status command::try_execute() noexcept {
         auto rc = step();
         return rc == status::done ? status::ok : rc;
     }
 
-    int64_t command::last_insert_rowid() const   {return db_.last_insert_rowid();}
+    int64_t command::last_insert_rowid() const noexcept   {return db_.last_insert_rowid();}
 
-    int command::changes() const                 {return db_.changes();}
+    int command::changes() const noexcept                 {return db_.changes();}
 
 
 #pragma mark - QUERY:
 
 
-    int query::column_count() const {
+    int query::column_count() const noexcept {
         return sqlite3_column_count(stmt_);
     }
 
@@ -229,64 +227,64 @@ namespace sqlite3pp {
 #pragma mark - QUERY ROW:
 
 
-    int query::row::column_count() const {
+    int query::row::column_count() const noexcept {
         return sqlite3_data_count(stmt_);
     }
 
-    int query::row::column_bytes(int idx) const {
+    int query::row::column_bytes(int idx) const noexcept {
         return sqlite3_column_bytes(stmt_, idx);
     }
 
-    int query::row::get_int(int idx) const {
+    int query::row::get_int(int idx) const noexcept {
         return sqlite3_column_int(stmt_, idx);
     }
 
-    long long int query::row::get_int64(int idx) const {
+    long long int query::row::get_int64(int idx) const noexcept {
         return sqlite3_column_int64(stmt_, idx);
     }
 
-    double query::row::get(int idx, double) const {
+    double query::row::get(int idx, double) const noexcept {
         return sqlite3_column_double(stmt_, idx);
     }
 
-    char const* query::row::get(int idx, char const*) const {
+    char const* query::row::get(int idx, char const*) const noexcept {
         return reinterpret_cast<char const*>(sqlite3_column_text(stmt_, idx));
     }
 
-    std::string query::row::get(int idx, std::string) const {
+    std::string query::row::get(int idx, std::string) const noexcept {
         char const* cstr = get(idx, (char const*)0);
         if (!cstr)
             return {};
         return {cstr, size_t(column_bytes(idx))};
     }
 
-    std::string_view query::row::get(int idx, std::string_view) const {
+    std::string_view query::row::get(int idx, std::string_view) const noexcept {
         char const* cstr = get(idx, (char const*)0);
         if (!cstr)
             return {};
         return {cstr, size_t(column_bytes(idx))};
     }
 
-    void const* query::row::get(int idx, void const*) const {
+    void const* query::row::get(int idx, void const*) const noexcept {
         return sqlite3_column_blob(stmt_, idx);
     }
 
-    blob query::row::get(int idx, blob) const {
+    blob query::row::get(int idx, blob) const noexcept {
         // It's important to make the calls in this order, so we get the size of the blob value, not the string value.
         auto data = sqlite3_column_blob(stmt_, idx);
         auto size = sqlite3_column_bytes(stmt_, idx);
         return {data, size_t(size), copy};
     }
 
-    query::row::getstream query::row::getter(int idx) const {
+    query::row::getstream query::row::getter(int idx) const noexcept {
         return getstream(this, idx);
     }
 
-    size_t column_value::size_bytes() const {
+    size_t column_value::size_bytes() const noexcept {
         return sqlite3_column_bytes(row_.stmt_, idx_);
     }
 
-    data_type column_value::type() const {
+    data_type column_value::type() const noexcept {
         return data_type{sqlite3_column_type(row_.stmt_, idx_)};
     }
 
@@ -303,7 +301,7 @@ namespace sqlite3pp {
             query_->throw_(rc_);
     }
 
-    query::iterator::~iterator() {
+    query::iterator::~iterator() noexcept {
         if (rc_ != status::done && query_)
             query_->reset();
     }

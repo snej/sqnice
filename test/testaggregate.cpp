@@ -1,24 +1,24 @@
 #include "test.h"
 #include <string>
 #include <iostream>
-#include "sqlite3pp.h"
-#include "sqlite3ppext.h"
+#include "sqnice.h"
+#include "sqniceext.h"
 
 using namespace std;
 
-void step0(sqlite3pp::ext::context& c)
+void step0(sqnice::ext::context& c)
 {
   int* sum = (int*) c.aggregate_data(sizeof(int));
 
   *sum += c.get<int>(0);
 }
-void finalize0(sqlite3pp::ext::context& c)
+void finalize0(sqnice::ext::context& c)
 {
   int* sum = (int*) c.aggregate_data(sizeof(int));
   c.result(*sum);
 }
 
-void step1(sqlite3pp::ext::context& c)
+void step1(sqnice::ext::context& c)
 {
   string* sum = (string*) c.aggregate_data(sizeof(string));
 
@@ -28,7 +28,7 @@ void step1(sqlite3pp::ext::context& c)
 
   *sum += c.get<string>(0);
 }
-void finalize1(sqlite3pp::ext::context& c)
+void finalize1(sqnice::ext::context& c)
 {
   string* sum = (string*) c.aggregate_data(sizeof(string));
   c.result(*sum);
@@ -87,9 +87,9 @@ struct plussum
 int main_aggregate()
 {
   try {
-    sqlite3pp::database db("foods.db");
+    sqnice::database db("foods.db");
 
-    sqlite3pp::ext::aggregate aggr(db);
+    sqnice::ext::aggregate aggr(db);
     cout << aggr.create("a0", &step0, &finalize0) << endl;
     cout << aggr.create("a1", &step1, &finalize1) << endl;
     cout << aggr.create<mysum<string>, string>("a2") << endl;
@@ -98,14 +98,14 @@ int main_aggregate()
     cout << aggr.create<strcnt, string>("a5") << endl;
     cout << aggr.create<plussum, int, int>("a6") << endl;
 
-    sqlite3pp::query qry(db, "SELECT a0(id), a1(name), a2(type_id), a3(id), a4(), a5(name), sum(type_id), a6(id, type_id) FROM foods");
+    sqnice::query qry(db, "SELECT a0(id), a1(name), a2(type_id), a3(id), a4(), a5(name), sum(type_id), a6(id, type_id) FROM foods");
 
     for (int i = 0; i < qry.column_count(); ++i) {
       cout << qry.column_name(i) << "\t";
     }
     cout << endl;
 
-    for (sqlite3pp::query::iterator i = qry.begin(); i != qry.end(); ++i) {
+    for (sqnice::query::iterator i = qry.begin(); i != qry.end(); ++i) {
       for (int j = 0; j < qry.column_count(); ++j) {
 	cout << (*i).get<char const*>(j) << "\t";
       }
