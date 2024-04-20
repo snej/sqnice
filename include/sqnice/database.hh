@@ -33,17 +33,14 @@
 ASSUME_NONNULL_BEGIN
 
 struct sqlite3;
+struct sqlite3_context;
+struct sqlite3_value;
 
 namespace sqnice {
 
     class database;
-
-    // Defined in sqniceext.hh
-    namespace ext {
-        class function;
-        class aggregate;
-        database borrow(sqlite3*);
-    }
+    class functions;
+    class aggregates;
 
 
     /** Flags used when opening a database; equivalent to `SQLITE_OPEN_...` macros in sqlite3.h. */
@@ -56,7 +53,6 @@ namespace sqnice {
         nomutex         = 0x00008000,   ///< Use the "multi-thread" threading mode (see docs)
         fullmutex       = 0x00010000,   ///< Use the "serialized" threading mode (see docs)
         nofollow        = 0x01000000,   ///< Symbolic links in path will not be followed
-        exrescode       = 0x02000000,   ///< Enable extended result codes
 #ifdef __APPLE__
         // Add no more than one of these, to specify an iOS file protection mode.
         fileprotection_complete             = 0x00100000,
@@ -70,7 +66,7 @@ namespace sqnice {
     inline open_flags operator& (open_flags a, open_flags b) {return open_flags(int(a) & int(b));}
     inline open_flags operator- (open_flags a, open_flags b) {return open_flags(int(a) & ~int(b));}
     inline open_flags& operator|= (open_flags& a, open_flags b) {a = a | b; return a;}
-
+    inline bool operator!(open_flags a) {return !int(a);}
 
     /** Per-database size/quantity limits that can be adjusted. */
     enum class limit : int {
@@ -85,14 +81,19 @@ namespace sqnice {
     /** A SQLite database connection. */
     class database : public checking, noncopyable {
     public:
-        /// Constructs an instance that opens a SQLite database file. Details depend on the flags.
+        /// Opens a SQLite database file. Details depend on the flags.
         /// Exceptions are enabled by default! If you want to open a database without potentially
         /// throwing an exception, use the no-arguments constructor instead, then call
-        /// `exceptions(false)` and then `connect`.
+        /// `exceptions(false)` and then `connect(filename,...)`.
         /// @throws database_error if the database cannot be opened.
         explicit database(std::string_view filename,
                           open_flags flags           = open_flags::readwrite | open_flags::create,
                           const char*  _Nullable vfs = nullptr);
+
+        /// Opens a temporary anonymous SQLite database.
+        /// @param on_disk  If false, the database is stored in memory;
+        ///                 if true, in a temporary file on disk (deleted on close.)
+        static database temporary(bool on_disk = false);
 
         /// Constructs an instance that uses an already-open SQLite database handle.
         /// Its destructor, and the `close` method, will not close this handle.
@@ -103,8 +104,9 @@ namespace sqnice {
         database() noexcept;
 
         ~database() noexcept;
-        database(database&& db) noexcept;
-        database& operator=(database&& db) noexcept;
+        // Moving a database object is forbidden because other nicepp objects point to it.
+        database(database&& db) = delete;
+        database& operator=(database&& db) = delete;
 
         /// Closes any existing connection and opens a new database file.
         status connect(std::string_view filename,
@@ -148,7 +150,6 @@ namespace sqnice {
         /// This is optional, but recommended. It must be called immedidately after connecting.
         ///
         /// It does the following things:
-        /// * Enables extended result codes.
         /// * Enables foreign key checks.
         /// * Sets a busy timeout of 5 seconds.
         ///
@@ -160,7 +161,6 @@ namespace sqnice {
 
         status enable_foreign_keys(bool enable = true);
         status enable_triggers(bool enable = true);
-        status enable_extended_result_codes(bool enable = true);
         status set_busy_timeout(int ms);
 
         /// Returns the current value of a limit. (See the `limits` enum.)
@@ -272,9 +272,17 @@ namespace sqnice {
         friend class statement;
         friend class database_error;
         friend class blob_stream;
-        friend class ext::function;
-        friend class ext::aggregate;
-        friend database ext::borrow(sqlite3* pdb);
+        friend class functions;
+        friend class aggregates;
+
+        using callFn = void (*)(sqlite3_context*, int, sqlite3_value *_Nonnull*_Nonnull);
+        using finishFn = void (*)(sqlite3_context*);
+        using destroyFn = void (*)(void*);
+        status create_function(const char *name, int nArg, void* _Nullable pApp,
+                               callFn _Nullable call,
+                               callFn _Nullable step = nullptr,
+                               finishFn _Nullable finish = nullptr,
+                               destroyFn _Nullable destroy = nullptr);
 
     private:
         sqlite3* _Nullable  db_ = nullptr;

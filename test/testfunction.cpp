@@ -2,49 +2,47 @@
 #include <string>
 #include <iostream>
 #include "sqnice/sqnice.hh"
-#include "sqniceext.h"
+#include "sqnice/functions.hh"
+#include "catch.hpp"
 
 using namespace std;
 
-int test0()
-{
-  return 100;
+namespace {
+    inline std::ostream& operator<<(std::ostream& out, sqnice::status s) {return out << int(s);}
+
+    int test0()
+    {
+        return 100;
+    }
+
+    void test1(sqnice::context& ctx)
+    {
+        ctx.result(200);
+    }
+
+    void test2(sqnice::context& ctx)
+    {
+        std::string args = ctx.get<std::string>(0);
+        ctx.result(args);
+    }
+
+    void test3(sqnice::context& ctx)
+    {
+        ctx.result_copy(0);
+    }
+
+    std::string test6(std::string const& s1, std::string const& s2, std::string const& s3)
+    {
+        return s1 + s2 + s3;
+    }
 }
 
-void test1(sqnice::ext::context& ctx)
-{
-  ctx.result(200);
-}
+TEST_CASE("SQNice functions", "[sqnice]") {
+    sqnice::database db = sqnice::database::temporary();
 
-void test2(sqnice::ext::context& ctx)
-{
-  std::string args = ctx.get<std::string>(0);
-  ctx.result(args);
-}
-
-void test3(sqnice::ext::context& ctx)
-{
-  ctx.result_copy(0);
-}
-
-std::string test5(std::string const& value)
-{
-  return value;
-}
-
-std::string test6(std::string const& s1, std::string const& s2, std::string const& s3)
-{
-  return s1 + s2 + s3;
-}
-
-int main_function()
-{
-  try {
-    sqnice::database db("test.db");
-
-    sqnice::ext::function func(db);
+    sqnice::functions func(db);
     cout << func.create<int ()>("h0", &test0) << endl;
-    cout << func.create("h1", &test1) << endl;
+    cout << func.create("h1", &test1, 0) << endl;
     cout << func.create("h2", &test2, 1) << endl;
     cout << func.create("h3", &test3, 1) << endl;
     cout << func.create<int ()>("h4", []{return 500;}) << endl;
@@ -54,20 +52,16 @@ int main_function()
     sqnice::query qry(db, "SELECT h0(), h1(), h2('x'), h3('y'), h4(), h5(10), h6('a', 'b', 'c')");
 
     for (int i = 0; i < qry.column_count(); ++i) {
-      cout << qry.column_name(i) << "\t";
+        cout << qry.column_name(i) << "\t";
     }
     cout << endl;
 
     for (sqnice::query::iterator i = qry.begin(); i != qry.end(); ++i) {
-      for (int j = 0; j < qry.column_count(); ++j) {
-	cout << (*i).get<char const*>(j) << "\t";
-      }
-      cout << endl;
+        for (int j = 0; j < qry.column_count(); ++j) {
+            cout << (*i).get<char const*>(j) << "\t";
+        }
+        cout << endl;
     }
     cout << endl;
-  }
-  catch (exception& ex) {
-    cout << ex.what() << endl;
-  }
-    return 0;
 }
+

@@ -42,7 +42,8 @@ namespace sqnice {
                              bool writeable)
     : checking(db)
     {
-        status_ = check(sqlite3_blob_open(db.db_, database, table, column, rowid, writeable, &blob_));
+        status_ = status{sqlite3_blob_open(db.db_, database, table, column, rowid, writeable, &blob_)};
+        check(status_);
         if (status_ == status::ok)
             size_ = sqlite3_blob_bytes(blob_);
     }
@@ -73,7 +74,8 @@ namespace sqnice {
         int checked_len = range_check(len, offset);
         if (checked_len < 0)
             return -1;
-        status_ = check(sqlite3_blob_read(blob_, dst, checked_len, int(offset)));
+        status_ = status{sqlite3_blob_read(blob_, dst, checked_len, int(offset))};
+        check(status_);
         return ok(status_) ? checked_len : -1;
     }
 
@@ -82,7 +84,8 @@ namespace sqnice {
         int checked_len = range_check(len, offset);
         if (checked_len < 0 || size_t(checked_len) < len)
             return -1;
-        status_ = check(sqlite3_blob_write(blob_, src, checked_len, int(offset)));
+        status_ = status{sqlite3_blob_write(blob_, src, checked_len, int(offset))};
+        check(status_);
         return ok(status_) ? checked_len : -1;
     }
 

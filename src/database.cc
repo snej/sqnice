@@ -66,7 +66,6 @@ namespace sqnice {
     static_assert(int(open_flags::nomutex)      == SQLITE_OPEN_NOMUTEX);
     static_assert(int(open_flags::fullmutex)    == SQLITE_OPEN_FULLMUTEX);
     static_assert(int(open_flags::nofollow)     == SQLITE_OPEN_NOFOLLOW);
-    static_assert(int(open_flags::exrescode)    == SQLITE_OPEN_EXRESCODE);
 #ifdef __APPLE__
     static_assert(int(open_flags::fileprotection_complete)
                   == SQLITE_OPEN_FILEPROTECTION_COMPLETE);
@@ -133,6 +132,7 @@ namespace sqnice {
     , borrowing_(true)
     { }
 
+#if 0
     database::database(database&& db) noexcept
     : checking(*this, db.exceptions_)
     , db_(std::move(db.db_))
@@ -159,7 +159,8 @@ namespace sqnice {
 
         return *this;
     }
-
+#endif
+    
     database::~database() noexcept {
         if (!borrowing_) {
             if (auto rc = status{sqlite3_close(db_)}; !ok(rc)) {
@@ -181,10 +182,30 @@ namespace sqnice {
         }
     }
 
-    status database::connect(std::string_view dbname, open_flags flags, char const* vfs) {
+    database database::temporary(bool on_disk) {
+        // "If the filename is an empty string, then a private, temporary on-disk database will
+        // be created [and] automatically deleted as soon as the database connection is closed."
+        std::string_view name;
+        open_flags flags = open_flags::readwrite;
+        if (!on_disk) {
+            name = "temporary";
+            flags |= open_flags::memory;
+        }
+        return database(name, flags);
+    }
+
+    status database::connect(std::string_view dbname_, open_flags flags, char const* vfs) {
         close();
 
-        auto rc = status{sqlite3_open_v2(std::string(dbname).c_str(), &db_, int(flags), vfs)};
+        std::string dbname(dbname_);
+        // "It is recommended that when a database filename actually does begin with a ":" character
+        // you should prefix the filename with a pathname such as "./" to avoid ambiguity."
+        if (dbname.starts_with(":") && !(flags & open_flags::uri))
+            dbname = "./" + dbname; //FIXME: Is this OK on Windows?
+
+        auto rc = status{sqlite3_open_v2(dbname.c_str(), &db_,
+                                         int(flags) | SQLITE_OPEN_EXRESCODE,
+                                         vfs)};
         if (!ok(rc)) {
             if (exceptions_) {
                 std::string message;
@@ -245,19 +266,13 @@ namespace sqnice {
         return check(sqlite3_db_config(db_, SQLITE_DBCONFIG_ENABLE_TRIGGER, enable ? 1 : 0, nullptr));
     }
 
-    status database::enable_extended_result_codes(bool enable) {
-        return check(sqlite3_extended_result_codes(db_, enable ? 1 : 0));
-    }
-
     status database::set_busy_timeout(int ms) {
         return check(sqlite3_busy_timeout(db_, ms));
     }
 
 
     status database::setup() {
-        status rc = enable_extended_result_codes(true);
-        if (!ok(rc)) {return rc;}
-        rc = enable_foreign_keys();
+        status rc = enable_foreign_keys();
         if (!ok(rc)) {return rc;}
         rc = set_busy_timeout(5000);
         if (ok(rc) && writeable()) {
@@ -479,6 +494,14 @@ namespace sqnice {
     void database::set_authorize_handler(authorize_handler h) noexcept {
         ah_ = h;
         sqlite3_set_authorizer(db_, ah_ ? authorizer_impl : nullptr, &ah_);
+    }
+
+
+    status database::create_function(const char *name, int nArg, void*pApp,
+                                     callFn call, callFn step, finishFn finish, destroyFn destroy)
+    {
+        return check( sqlite3_create_function_v2(db_, name, nArg, SQLITE_UTF8, pApp,
+                                                 call, step , finish, destroy) );
     }
 
 }

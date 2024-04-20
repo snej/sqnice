@@ -62,11 +62,10 @@ namespace sqnice {
         ~blob_stream() noexcept;
 
         /// The status of the last operation: opening the blob handle, or the last read.
-        /// @note  If exceptions are enabled,
-        status status() const noexcept                  {return status_;}
+        status last_status() const noexcept             {return status_;}
 
         /// The size in bytes of the blob.
-        /// @note  This API uses `int` internally so blobs are limited to 2^31 bytes (~2GB.)
+        /// @note  SQLite's API uses `int`, so blobs are limited to 2^31 bytes (~2GB.)
         uint64_t size() const noexcept                  {return size_;}
 
         /// Reads from the blob.
@@ -95,7 +94,7 @@ namespace sqnice {
 
         sqlite3_blob* _Nullable blob_ = nullptr;
         uint64_t                size_ = 0;
-        mutable enum status     status_;
+        mutable status          status_;
     };
 
 }

@@ -1,27 +1,20 @@
 #include "test.h"
 #include <iostream>
 #include "sqnice/sqnice.hh"
+#include "catch.hpp"
 
 using namespace std;
 
-int main_disconnect()
-{
-  try {
-    sqnice::database db("test.db");
+TEST_CASE("SQNice close", "[sqnice]") {
+    sqnice::database db = sqnice::database::temporary();
     {
-      sqnice::transaction xct(db);
-      {
-	sqnice::command cmd(db, "INSERT INTO contacts (name, phone) VALUES ('AAAA', '1234')");
+        db.execute("CREATE TABLE contacts (name, phone)");
+        sqnice::transaction xct(db);
+        {
+            sqnice::command cmd(db, "INSERT INTO contacts (name, phone) VALUES ('AAAA', '1234')");
 
-	cout << cmd.execute() << endl;
-      }
+            cmd.execute();
+        }
     }
-    cout << db.disconnect() << endl;
-
-  }
-  catch (exception& ex) {
-    cout << ex.what() << endl;
-  }
-    return 0;
-
+    db.close();
 }

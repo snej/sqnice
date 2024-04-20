@@ -66,9 +66,9 @@ namespace sqnice {
     };
 
 
-    class null_type {};
-    /** A singleton value representing SQL `NULL`, for use with the `bind` API. */
-    constexpr null_type ignore;
+    struct null_type {};
+    /** A singleton value representing SQL `NULL`, for use with the `getstream` API. */
+    extern null_type ignore;  //FIXME: This is awkward; get rid of it or make it constexpr
 
 
     /** Specifies how string and blob values are bound. `copy` is safer, `nocopy` faster.*/
@@ -98,9 +98,12 @@ namespace sqnice {
         bool prepared() const                           {return stmt_ != nullptr;}
         explicit operator bool() const                  {return prepared();}
 
+        /// True if the statement is running; `reset` clears this.
+        bool busy() const noexcept;
+
         /// Stops the execution of the statement.
         /// @note  This does not clear bindings.
-        status reset();
+        status reset() noexcept;
 
         /// Clears all the parameter bindings to `NULL`.
         status clear_bindings();
@@ -489,18 +492,14 @@ namespace sqnice {
         std::optional<T> result;
         if (auto i = begin())
             result = i->get<T>(0);
-        reset();
         return result;
     }
 
     template <typename T>
     T query::single_value_or(T const& defaultResult) {
         if (auto i = begin()) {
-            T result = i->get<T>(0);
-            reset();
-            return result;
+            return i->get<T>(0);
         } else {
-            reset();
             return defaultResult;
         }
     }

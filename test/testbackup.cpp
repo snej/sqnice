@@ -1,14 +1,15 @@
 #include "test.h"
 #include <iostream>
 #include "sqnice/sqnice.hh"
+#include "catch.hpp"
 
 using namespace std;
 
 int main_backup()
 {
   try {
-    sqnice::database db("test.db");
-    sqnice::database backupdb("backup.db");
+    sqnice::database db("test.db", sqnice::open_flags::readonly);
+    sqnice::database backupdb = sqnice::database::temporary();
 
     db.backup(
       backupdb,

@@ -44,6 +44,9 @@ namespace sqnice {
     static_assert(int(data_type::null)          == SQLITE_NULL);
 
 
+    null_type ignore;
+
+
 #pragma mark - STATEMENT:
 
 
@@ -77,7 +80,7 @@ namespace sqnice {
         } else if (rc == status::error && exceptions_) {
             // Throw a better exception:
             std::string message(db_.error_msg());
-            message += " in \"" + std::string(sql) + "\"";
+            message += ", in SQL statement \"" + std::string(sql) + "\"";
             throw std::invalid_argument(message);
         }
         return check(rc);
@@ -120,9 +123,16 @@ namespace sqnice {
         return status{sqlite3_step(stmt_)};
     }
 
-    status statement::reset() {
+    bool statement::busy() const noexcept {
+        return stmt_ && sqlite3_stmt_busy(stmt_);
+    }
+
+    status statement::reset() noexcept {
+        if (!stmt_)
+            return status::ok;
         // "If the most recent call to sqlite3_step ... indicated an error, then sqlite3_reset
-        // returns an appropriate error code." Since this is not a new error, don't call check().
+        // returns an appropriate error code." 
+        // Since this is not a new error, don't call check().
         return status{sqlite3_reset(stmt_)};
     }
 
