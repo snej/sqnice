@@ -34,60 +34,44 @@ ASSUME_NONNULL_BEGIN
 namespace sqnice {
     class database;
 
-    /** An RAII wrapper around SQLite's `BEGIN` and `COMMIT`/`ROLLBACK` commands.
-        @note  These do not nest! If you need nesting, use `savepoint` instead. */
-    class transaction : public checking, noncopyable {
+    /** An RAII wrapper around SQLite's transactions and savepoints. */
+    class transaction : noncopyable {
     public:
-        /// Begins a transaction.
+        /// Begins a transaction, which lasts until this object exits scope / is destructed.
+        /// Transactions may be nested. Aborting a nested transaction only rolls back the changes
+        /// made since that nested transaction began.
+        ///
+        /// Normally, you should call `commit` to commit the transaction, otherwise it will
+        /// abort/rollback when the object exits scope. However, you can set the `autocommit`
+        /// argument in the constructor, which will cause the destructor to commit the transaction.
+        /// (If the destructor is called because an exception is thrown, the transaction aborts
+        /// instead.)
+        ///
         /// @param db  The database.
-        /// @param autocommit  If true, the transaction will automatically commit when
-        ///     the destructor runs. Not recommended because destructors should not throw
-        ///     exceptions, so you won't know if it succeeded or not.
         /// @param immediate  If true, uses `BEGIN IMMEDIATE`, which immediately grabs
         ///     the database lock. If false, the first write you make in the transaction
         ///     will try to grab the lock but will fail if another transaction is active.
-        /// @throws database_error if a transaction is already active.
+        /// @param autocommit  If true, the transaction will automatically commit when
+        ///     the object exits scope (unless it's because an exception is being thrown.)
+        /// @throws database_error on any error (whether or not database.exceptions() is true)
         explicit transaction(database& db,
-                             bool autocommit = false,
-                             bool immediate = true);
+                             bool immediate = true,
+                             bool autocommit = false);
         transaction(transaction&&) noexcept;
         ~transaction() noexcept;
 
         /// Commits the transaction.
-        status commit();
+        status commit()     {return end(true);}
+
         /// Rolls back (aborts) the transaction.
-        status rollback();
+        /// This also happens when the transaction object exits scope without being committed first
+        /// (unless you specified `autocommit` in the constructor.)
+        status rollback()   {return end(false);}
 
     private:
-        bool active_;
-        bool autocommit_;
-    };
+        status end(bool commit);
 
-
-    /** A savepoint is like a transaction but can be nested. */
-    class savepoint : public checking, noncopyable {
-    public:
-        /// Begins a transaction.
-        /// @param db  The database.
-        /// @param autocommit  If true, the transaction will automatically commit when
-        ///     the destructor runs. Not recommended because destructors should not throw
-        ///     exceptions, so you won't know if it succeeded or not.
-        explicit savepoint(database& db, bool autocommit = false);
-        savepoint(savepoint&&) noexcept;
-        ~savepoint() noexcept;
-
-        /// Commits the savepoint.
-        /// @note  Changes made in a nested savepoint are not actually persisted until
-        ///     the outermost savepoint is committed.
-        status commit();
-
-        /// Rolls back (aborts) the savepoint. All changes made since the savepoint was
-        ///     created are removed.
-        status rollback();
-
-    private:
-        status execute(char const *cmd);
-
+        database& db_;
         bool active_;
         bool autocommit_;
     };

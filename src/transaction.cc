@@ -26,6 +26,7 @@
 
 #include "sqnice/transaction.hh"
 #include "sqnice/database.hh"
+#include <exception>
 
 #ifdef SQNICE_LOADABLE_EXTENSION
 #  include <sqlite3ext.h>
@@ -37,17 +38,17 @@ SQLITE_EXTENSION_INIT1
 namespace sqnice {
 
     transaction::transaction(database& db, bool auto_commit, bool immediate)
-    : checking(db)
+    : db_(db)
     , active_(true)
     , autocommit_(auto_commit)
     {
-        status rc = db_.execute(immediate ? "BEGIN IMMEDIATE" : "BEGIN");
+        status rc = db_.beginTransaction(immediate);
         if (!ok(rc))
             db_.raise(rc);  // always throw -- constructor cannot return a status
     }
 
     transaction::transaction(transaction &&t) noexcept
-    : checking(std::move(t))
+    : db_(t.db_)
     , active_(t.active_)
     , autocommit_(t.autocommit_)
     {
@@ -57,62 +58,23 @@ namespace sqnice {
 
     transaction::~transaction() noexcept {
         if (active_) {
-            exceptions(false);
-            (void)db_.execute(autocommit_ ? "COMMIT" : "ROLLBACK");
+            if (autocommit_ && !std::current_exception()) {
+                // It is legal (though discouraged) to throw an exception from a destructor,
+                // as long as the destructor was not called as part of unwinding the stack
+                // while an exception is thrown.
+                (void)db_.endTransaction(true);
+            } else {
+                auto x = db_.exceptions();
+                db_.exceptions(false);
+                (void)db_.endTransaction(false);
+                db_.exceptions(x);
+            }
         }
     }
 
-    status transaction::commit() {
+    status transaction::end(bool commit) {
         active_ = false;
-        return check(db_.execute("COMMIT"));
-    }
-
-    status transaction::rollback() {
-        active_ = false;
-        return check(db_.execute("ROLLBACK"));
-    }
-
-
-    savepoint::savepoint(database& db, bool autocommit)
-    : checking(db)
-    , active_(true)
-    , autocommit_(autocommit)
-    {
-        status rc = execute("SAVEPOINT");
-        if (rc != status::ok)
-            throw_(rc);
-    }
-
-    savepoint::savepoint(savepoint &&s) noexcept
-    : checking(std::move(s))
-    , active_(s.active_)
-    , autocommit_(s.autocommit_)
-    {
-        s.active_ = false;
-    }
-
-    savepoint::~savepoint() noexcept {
-        if (active_) {
-            exceptions(false);
-            execute(autocommit_ ? "RELEASE" : "ROLLBACK TO");
-        }
-    }
-
-    status savepoint::commit() {
-        active_ = false;
-        return execute("RELEASE");
-    }
-
-    status savepoint::rollback() {
-        active_ = false;
-        return execute("ROLLBACK TO");
-    }
-
-    status savepoint::execute(char const *cmd) {
-        // Each nested savepoint should have a distinct identifier.
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%s sp_%p", cmd, (void*)this);
-        return check(db_.execute(buf));
+        return db_.endTransaction(commit);
     }
 
 }

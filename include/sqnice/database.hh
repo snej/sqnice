@@ -283,8 +283,16 @@ namespace sqnice {
         void set_update_handler(update_handler) noexcept;
         void set_authorize_handler(authorize_handler) noexcept;
 
+        /// Low-level transaction support: begins a transaction. 
+        /// Transactions can nest; nested transactions are implemented as savepoints.
+        /// @param immediate  If true, the database immediately acquires an exclusive lock.
         status beginTransaction(bool immediate);
+
+        /// Low-level transaction support: ends a (possibly nested) transaction.
+        /// @param commit  If true, commits the transaction; if false, aborts.
         status endTransaction(bool commit);
+
+        /// The number of beginTransaction calls not balanced by endTransaction.
         int transaction_depth() const noexcept          {return txn_depth_;}
 
     private:
