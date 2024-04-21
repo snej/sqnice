@@ -308,7 +308,7 @@ namespace sqnice {
     , cur_row_(query_->stmt_)
     {
         if (rc_ != status::row && rc_ != status::done)
-            query_->throw_(rc_);
+            query_->raise(rc_);
     }
 
     query::iterator::~iterator() noexcept {
@@ -319,7 +319,7 @@ namespace sqnice {
     query::iterator& query::iterator::operator++() {
         rc_ = query_->step();
         if (rc_ != status::row && rc_ != status::done)
-            query_->throw_(rc_);
+            query_->raise(rc_);
         return *this;
     }
 

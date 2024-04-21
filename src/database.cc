@@ -90,26 +90,37 @@ namespace sqnice {
     }
 
 
-    database_error::database_error(database& db, status rc)
-    : database_error(sqlite3_errmsg(db.db_), rc)
-    { }
-
-
     checking::checking(database &db)
     :checking(db, db.exceptions_)
     { }
 
 
     status checking::check(status rc) const {
-        if (!ok(rc) && exceptions_)
-            throw_(rc);
+        if (!ok(rc) && exceptions_) [[unlikely]]
+            raise(rc);
         return rc;
     }
 
 
-    void checking::throw_(status rc) const {
-        assert(!ok(rc));
-        throw database_error(db_, rc);
+    void checking::raise(status rc) const {
+        const char* msg = db_.error_msg();
+        switch (int(rc)) {
+            case SQLITE_INTERNAL:
+                throw std::logic_error(msg);
+            case SQLITE_NOMEM:
+                throw std::bad_alloc();
+            case SQLITE_RANGE:
+            case SQLITE_MISUSE:
+                throw std::invalid_argument(msg);
+            case SQLITE_OK:
+            case SQLITE_NOTICE:
+            case SQLITE_WARNING:
+            case SQLITE_ROW:
+            case SQLITE_DONE:
+                throw std::logic_error("invalid call to throw_, err=" + std::to_string(int(rc)));
+            default:        
+                throw database_error(msg, rc);
+        }
     }
 
 

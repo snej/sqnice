@@ -49,6 +49,7 @@
 ASSUME_NONNULL_BEGIN
 
 namespace sqnice {
+    class checking;
     class database;
 
     /** A SQLite error code. Values are the same as `SQLITE_OK`, `SQLITE_ERROR`, ... */
@@ -75,9 +76,7 @@ namespace sqnice {
     class database_error : public std::runtime_error {
     public:
         explicit database_error(char const* msg, status rc);
-        explicit database_error(database& db, status rc);
         explicit database_error(char const* msg, int rc)    :database_error(msg,status{rc}) { }
-        explicit database_error(database& db, int rc)       :database_error(db,status{rc}) { }
 
         status const error_code;
     };
@@ -108,14 +107,20 @@ namespace sqnice {
         /// True if exceptions are enabled.
         bool exceptions()           {return exceptions_;}
 
+        /// If `rc` is not OK, and exceptions are enabled, calls `raise(rc)`. Else returns it.
+        status check(status rc) const;
+
+        /// Throws an exception, depending on the value of `rc`. Usually `database_error`,
+        /// but could be `std::invalid_argument`, `std::bad_alloc` or `std::logic_error`.
+        /// @warning Do not pass `status::ok`! If this might not be an error, call `check`.
+        [[noreturn]] void raise(status rc) const;
+
         static constexpr bool kExceptionsByDefault = true;
         
     protected:
         checking(database &db, bool x)              :db_(db), exceptions_(x) { }
         explicit checking(database &db);
-        status check(status rc) const;
         status check(int rc) const                  {return check(status{rc});}
-        [[noreturn]] void throw_(status rc) const;
 
         database&   db_;
         bool        exceptions_;

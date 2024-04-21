@@ -288,11 +288,10 @@ namespace sqnice {
         int transaction_depth() const noexcept          {return txn_depth_;}
 
     private:
-        friend class statement;
-        friend class database_error;
+        friend class aggregates;
         friend class blob_stream;
         friend class functions;
-        friend class aggregates;
+        friend class statement;
 
         using callFn = void (*)(sqlite3_context*, int, sqlite3_value *_Nonnull*_Nonnull);
         using finishFn = void (*)(sqlite3_context*);

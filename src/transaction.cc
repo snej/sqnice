@@ -42,8 +42,8 @@ namespace sqnice {
     , autocommit_(auto_commit)
     {
         status rc = db_.execute(immediate ? "BEGIN IMMEDIATE" : "BEGIN");
-        if (rc != status::ok)
-            throw_(rc);
+        if (!ok(rc))
+            db_.raise(rc);  // always throw -- constructor cannot return a status
     }
 
     transaction::transaction(transaction &&t) noexcept
