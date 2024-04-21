@@ -531,7 +531,6 @@ namespace sqnice {
                                         std::tuple<database&,const char*,statement::persistence>{
                                                 db_, sql.c_str(), statement::persistent});
                 stmt = &x.first->second;
-                assert(stmt);
             }
             return stmt->shared_copy();
         }

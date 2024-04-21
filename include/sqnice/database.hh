@@ -38,9 +38,12 @@ struct sqlite3_value;
 
 namespace sqnice {
 
+    class aggregates;
+    class command;
     class database;
     class functions;
-    class aggregates;
+    class query;
+    template <class STMT> class statement_cache;
 
 
     /** Flags used when opening a database; equivalent to `SQLITE_OPEN_...` macros in sqlite3.h. */
@@ -192,9 +195,6 @@ namespace sqnice {
         status extended_error_code() const noexcept;
         char const* _Nullable error_msg() const noexcept;
 
-        /// True if a transaction or savepoint is active.
-        bool in_transaction() const noexcept;
-
         /// The `rowid` of the last row inserted by an `INSERT` statement.
         int64_t last_insert_rowid() const noexcept;
 
@@ -203,6 +203,10 @@ namespace sqnice {
 
         /// The total number of rows changed since the connection was opened.
         int64_t total_changes() const noexcept;
+
+        /// True if a transaction or savepoint is active.
+        bool in_transaction() const noexcept;
+
 
 #pragma mark - EXECUTING:
 
@@ -216,6 +220,17 @@ namespace sqnice {
                                                 __attribute__((__format__ (__printf__, 2, 3)))
 #endif
         ;
+
+        /// Returns a `command` object that will run the given SQL statement.
+        /// @note This object comes from an internal `command_cache`, so subsequent calls with the
+        ///       same SQL string will use the precompiled statement instead of compiling it again.
+        [[nodiscard]] sqnice::command command(std::string_view sql);
+
+        /// Returns a `query` object that will run the given SQL statement.
+        /// @note This object comes from an internal `command_cache`, so subsequent calls with the
+        ///       same SQL string will use the precompiled statement instead of compiling it again.
+        [[nodiscard]] sqnice::query query(std::string_view sql);
+
 
 #pragma mark - MAINTENANCE
 
@@ -268,6 +283,10 @@ namespace sqnice {
         void set_update_handler(update_handler) noexcept;
         void set_authorize_handler(authorize_handler) noexcept;
 
+        status beginTransaction(bool immediate);
+        status endTransaction(bool commit);
+        int transaction_depth() const noexcept          {return txn_depth_;}
+
     private:
         friend class statement;
         friend class database_error;
@@ -287,6 +306,10 @@ namespace sqnice {
     private:
         sqlite3* _Nullable  db_ = nullptr;
         bool                borrowing_ = false;
+        int                 txn_depth_ = 0;
+        bool                txn_immediate_ = false;
+        std::unique_ptr<statement_cache<sqnice::command>> commands_;
+        std::unique_ptr<statement_cache<sqnice::query>> queries_;
         log_handler         lh_;
         busy_handler        bh_;
         commit_handler      ch_;

@@ -162,22 +162,19 @@ namespace sqnice {
 #endif
     
     database::~database() noexcept {
-        if (!borrowing_) {
-            if (auto rc = status{sqlite3_close(db_)}; !ok(rc)) {
+        if (db_ && !borrowing_) {
+            exceptions(false);  // don't throw from a destructor
+            if (auto rc = close(true); rc == status::busy) {
                 // Closing the database failed: there are still SQLite statements (queries) open,
                 // probably `command` or `query` objects that haven't been destructed yet.
-                // Unfortunately in a destructor, unlike `close()`, we can't throw an exception
+                // Unfortunately in a destructor, unlike `close()`, we mustn't throw an exception
                 // to make the operation fail. The best we can do is to call `sqlite3_close_v2`
                 // which will defer the close until the last open handle is gone.
-                // As an additional safeguard, prevent SQLite from checkpointing the WAL when it
-                // does finally close: if this happens after the file has been reopened or deleted,
-                // it can overwrite a mismatched WAL, causing data corruption.
                 fprintf(stderr, "**SQLITE WARNING**: A `sqnice::database` object at %p"
                         "is being destructed while there are still open query iterators, blob"
                         " streams or backups. This is bad! (For more information, read the docs for"
                         "`sqnice::database::close`.)\n", (void*)db_);
-                sqlite3_db_config(db_, SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, 1, nullptr);
-                (void) sqlite3_close_v2(db_);
+                (void)close(false);
             }
         }
     }
@@ -225,9 +222,26 @@ namespace sqnice {
     }
 
     status database::close(bool immediately) {
-        if (borrowing_)
+        commands_.reset();
+        queries_.reset();
+
+        if (borrowing_ || !db_)
             return status::ok;
-        auto rc = status{immediately ? sqlite3_close(db_) : sqlite3_close_v2(db_)};
+
+        status rc;
+        if (immediately) {
+            rc = status{sqlite3_close(db_)};
+        } else {
+            // sqlite3_close_v2() may not close the db immediately: if there are still active
+            // statements/backups/blob_handles, it waits for those to be freed. 
+            // There is a rare but extremely nasty situation where the caller might delete the
+            // database and open a new one at the same path _before_ SQLite actually closes it;
+            // in this case SQLite overwrites a mismatched WAL, causing data corruption.
+            // To prevent this, prevent SQLite from checkpointing on close.
+            sqlite3_db_config(db_, SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, 1, nullptr);
+            rc = status{sqlite3_close_v2(db_)};
+        }
+
         if (ok(rc))
             db_ = nullptr;
         return check(rc);
@@ -247,6 +261,19 @@ namespace sqnice {
         va_end(ap);
 
         return execute(msql.get());
+    }
+
+
+    command database::command(std::string_view sql) {
+        if (!commands_)
+            commands_ = std::make_unique<command_cache>(*this);
+        return commands_->compile(std::string(sql));
+    }
+
+    query database::query(std::string_view sql) {
+        if (!queries_)
+            queries_ = std::make_unique<query_cache>(*this);
+        return queries_->compile(std::string(sql));
     }
 
 
@@ -270,7 +297,6 @@ namespace sqnice {
         return check(sqlite3_busy_timeout(db_, ms));
     }
 
-
     status database::setup() {
         status rc = enable_foreign_keys();
         if (!ok(rc)) {return rc;}
@@ -285,11 +311,11 @@ namespace sqnice {
 
 
     int64_t database::pragma(const char* pragma) {
-        return query(*this, std::string("PRAGMA \"") + pragma + "\"").single_value_or<int>(0);
+        return sqnice::query(*this, std::string("PRAGMA \"") + pragma + "\"").single_value_or<int>(0);
     }
 
     std::string database:: string_pragma(const char* pragma) {
-        return query(*this, std::string("PRAGMA \"") + pragma + "\"").single_value_or<std::string>("");
+        return sqnice::query(*this, std::string("PRAGMA \"") + pragma + "\"").single_value_or<std::string>("");
     }
 
     status database::pragma(const char* pragma, int64_t value) {
@@ -347,6 +373,66 @@ namespace sqnice {
 
     bool database::in_transaction() const noexcept {
         return !sqlite3_get_autocommit(db_);
+    }
+
+
+#pragma mark - TRANSACTIONS:
+
+
+    status database::beginTransaction(bool immediate) {
+        if (txn_depth_ == 0) {
+            if (immediate) {
+                if (in_transaction())
+                    throw std::logic_error("unexpectedly already in a transaction");
+                // Create an immediate txn, otherwise SAVEPOINT defaults to DEFERRED
+                if (auto rc = command("BEGIN IMMEDIATE").execute(); !ok(rc))
+                    return rc;
+            }
+            txn_immediate_ = immediate;
+        }
+
+        char sql[30];
+        snprintf(sql, sizeof(sql), "SAVEPOINT sp_%d", txn_depth_ + 1);
+        if (auto rc = command(sql).execute(); !ok(rc)) {
+            if (txn_depth_ == 0 && immediate)
+                (void)command("ROLLBACK").execute();
+            return rc;
+        }
+
+        ++txn_depth_;
+        return status::ok;
+    }
+
+
+    status database::endTransaction(bool commit) {
+        if (txn_depth_ <= 0) [[unlikely]]
+            throw std::logic_error("transaction underflow");
+        char sql[50];
+        if (!commit) {
+            /// "Instead of cancelling the transaction, the ROLLBACK TO command restarts the
+            /// transaction again at the beginning. All intervening SAVEPOINTs are canceled,
+            /// however." --https://sqlite.org/lang_savepoint.html
+            snprintf(sql, sizeof(sql), "ROLLBACK TO SAVEPOINT sp_%d", txn_depth_);
+            if (auto rc = command(sql).execute(); !ok(rc))
+                return rc;
+            /// Thus we also have to call RELEASE to pop the savepoint from the stack...
+        }
+        snprintf(sql, sizeof(sql), "RELEASE SAVEPOINT sp_%d", txn_depth_);
+        if (auto rc = command(sql).execute(); !ok(rc))
+            return rc;
+
+        --txn_depth_;
+        if (txn_depth_ == 0) {
+            if (txn_immediate_) {
+                if (!in_transaction())
+                    throw std::logic_error("unexpectedly not in a transaction");
+                if (auto rc = command(commit ? "COMMIT" : "ROLLBACK").execute(); !ok(rc)) {
+                    ++txn_depth_;
+                    return rc;
+                }
+            }
+        }
+        return status::ok;
     }
 
 
