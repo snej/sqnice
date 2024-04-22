@@ -93,12 +93,12 @@ namespace sqnice {
         return prepare_impl(sql, persistence);
     }
 
-    int statement::bind_parameter_index(const char* name) const noexcept {
+    int statement::parameter_index(const char* name) const noexcept {
         return sqlite3_bind_parameter_index(stmt_, name);
     }
 
-    int statement::check_bind_parameter_index(const char* name) const {
-        if (int idx = sqlite3_bind_parameter_index(stmt_, name); idx >= 1 || !exceptions_)
+    int statement::check_parameter_index(const char* name) const {
+        if (int idx = sqlite3_bind_parameter_index(stmt_, name); idx >= 1)
             return idx;
         else [[unlikely]]
             throw std::invalid_argument("unknown binding name");

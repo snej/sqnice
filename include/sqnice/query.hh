@@ -119,11 +119,11 @@ namespace sqnice {
         bindstream binder(int idx = 1);
 
         /// Returns the (1-based) index of a named parameter, or 0 if none exists.
-        int bind_parameter_index(const char* name) const noexcept;
+        int parameter_index(const char* name) const noexcept;
 
         /// Returns the (1-based) index of a named parameter, or throws if none exists.
         /// @throws std::invalid_argument
-        int check_bind_parameter_index(const char* name) const;
+        int check_parameter_index(const char* name) const;
 
         // The following methods bind values to numbered parameters (`?` params start at 1)
 
@@ -167,13 +167,13 @@ namespace sqnice {
         /// Binds a value to a named parameter.
         template <typename T>
         status bind(char const* name, T&& v)            {
-            return bind(check_bind_parameter_index(name), std::forward<T>(v));
+            return bind(check_parameter_index(name), std::forward<T>(v));
         }
 
         /// Binds a value to a named parameter, with a copy/nocopy flag.
         template <typename T>
         status bind(char const* name, T&& v, copy_semantic cp)            {
-            return bind(check_bind_parameter_index(name), std::forward<T>(v), cp);
+            return bind(check_parameter_index(name), std::forward<T>(v), cp);
         }
 
     protected:

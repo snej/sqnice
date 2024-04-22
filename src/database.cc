@@ -97,8 +97,11 @@ namespace sqnice {
 
 
     status checking::check(status rc) const {
-        if (!ok(rc) && exceptions_) [[unlikely]]
-            raise(rc);
+        if (!ok(rc)) [[unlikely]] {
+            if (exceptions_ || rc == status::misuse)
+                if (rc != status::done && rc != status::row)
+                    raise(rc);
+        }
         return rc;
     }
 
@@ -472,24 +475,36 @@ namespace sqnice {
     }
 
     status database::backup(std::string_view dbname,
-                            database& destdb, std::string_view destdbname,
-                            backup_handler h, int step_page)
+                            database& destdb, 
+                            std::string_view destdbname,
+                            backup_handler handler,
+                            int step_page)
     {
+        auto rc = status::ok;
         sqlite3_backup* bkup = sqlite3_backup_init(destdb.db_,
                                                    std::string(destdbname).c_str(),
                                                    db_,
                                                    std::string(dbname).c_str());
         if (!bkup) {
-            return error_code();
+            // "If an error occurs within sqlite3_backup_init, then ... an error code and error
+            // message are stored in the destination database connection"
+            rc = destdb.extended_error_code();
+            if (exceptions_)
+                raise(rc, destdb.error_msg());
+            return rc;
         }
-        auto rc = status::ok;
+
+        // Run the backup incrementally:
         do {
             rc = status{sqlite3_backup_step(bkup, step_page)};
-            if (h) {
-                h(sqlite3_backup_remaining(bkup), sqlite3_backup_pagecount(bkup), rc);
-            }
+            if (handler)
+                handler(sqlite3_backup_remaining(bkup), sqlite3_backup_pagecount(bkup), rc);
         } while (rc == status::ok || rc == status::busy || rc == status::locked);
-        sqlite3_backup_finish(bkup);
+
+        // Finish:
+        auto end_rc = status{sqlite3_backup_finish(bkup)};
+        if (rc == status::done)
+            rc = end_rc;
         return check(rc);
     }
 

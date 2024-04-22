@@ -59,28 +59,15 @@ target_include_directories( sqnice PUBLIC
     include/
 )
 
-target_compile_options( sqnice PRIVATE
-    -Wno-deprecated-declarations
-)
-
 
 #### TESTS
 
 
 add_executable( sqnice_tests
-    test/testaggregate.cpp
-    test/testbackup.cpp
-    test/testcallback.cpp
-    test/testdb.cpp
-    test/testdisconnect.cpp
-    test/testfunction.cpp
-    test/testinsert.cpp
-    test/testselect.cpp
+    test/testdb.cc
+    test/testfunctions.cc
+    test/testquery.cc
     test/test_main.cc
-)
-
-target_compile_options( sqnice_tests PRIVATE
-    -Wno-deprecated-declarations
 )
 
 target_link_libraries( sqnice_tests
