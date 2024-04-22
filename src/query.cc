@@ -280,34 +280,28 @@ namespace sqnice {
         return sqlite3_column_int64(stmt_, idx_);
     }
 
-    double column_value::get(double) const noexcept {
+    double column_value::get_double() const noexcept {
         return sqlite3_column_double(stmt_, idx_);
     }
 
-    char const* column_value::get(char const*) const noexcept {
+    template<> char const* column_value::get() const noexcept {
         return reinterpret_cast<char const*>(sqlite3_column_text(stmt_, idx_));
     }
 
-    std::string column_value::get(std::string) const noexcept {
-        char const* cstr = get((char const*)0);
+    template<> std::string_view column_value::get() const noexcept {
+        char const* cstr = get<const char*>();
         if (!cstr)
             return {};
         return {cstr, size_bytes()};
     }
 
-    std::string_view column_value::get(std::string_view) const noexcept {
-        char const* cstr = get((char const*)0);
-        if (!cstr)
-            return {};
-        return {cstr, size_bytes()};
-    }
-
-    void const* column_value::get(void const*) const noexcept {
+    template<> void const* column_value::get() const noexcept {
         return sqlite3_column_blob(stmt_, idx_);
     }
 
-    blob column_value::get(blob) const noexcept {
-        // It's important to make the calls in this order, so we get the size of the blob value, not the string value.
+    template<> blob column_value::get() const noexcept {
+        // It's important to make the calls in this order,
+        // so we get the size of the blob value, not the string value.
         auto data = sqlite3_column_blob(stmt_, idx_);
         auto size = sqlite3_column_bytes(stmt_, idx_);
         return {data, size_t(size), copy};

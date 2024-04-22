@@ -35,8 +35,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <tuple>
-#include <unordered_map>
 
 ASSUME_NONNULL_BEGIN
 
@@ -71,7 +69,7 @@ namespace sqnice {
     extern null_type ignore;  //FIXME: This is awkward; get rid of it or make it constexpr
 
 
-    /** Specifies how string and blob values are bound. `copy` is safer, `nocopy` faster.*/
+    /** Specifies how string and blob args are bound. `copy` is safer, `nocopy` faster.*/
     enum copy_semantic { copy, nocopy };
 
 
@@ -342,17 +340,6 @@ namespace sqnice {
     };
 
 
-    /** Specializing the struct `sqnice::column_helper<T>` and adding a static method
-        `get(row&, unsigned idx) -> T` allows a query column value to be converted to type T. */
-    template <typename T> struct column_helper{ };
-    template <typename T>
-
-    /** The concept `columnable` identifies custom types column values can be converted to. */
-    concept columnable = requires(column_value const& col) {
-        {column_helper<T>::get(col)} -> std::same_as<T>;
-    };
-
-
     /** Represents the current row of a query being iterated.
         @note  Columns are numbered from 0. */
     class query::row {
@@ -388,13 +375,25 @@ namespace sqnice {
     };
 
 
+    /** Specializing the struct `sqnice::column_helper<T>` and adding a static method
+        `get(row&, unsigned idx) -> T` allows a query column value to be converted to type T. */
+    template <typename T> struct column_helper{ };
+    template <typename T>
+
+    /** The concept `columnable` identifies custom types column values can be converted to. */
+    concept columnable = requires(column_value const& col) {
+        {column_helper<T>::get(col)} -> std::same_as<T>;
+    };
+
+
     /** Represents a single column of a query row; returned by `query::row[]`. */
     class column_value : sqnice::noncopyable {
     public:
-        template <typename T> operator T() const noexcept  {return get<T>();}
+        /// Gets the value as type `T`.
+        template <typename T> T get() const noexcept;
 
-        template <typename T> T get() const noexcept    {return get(T());}
-        template <columnable T> T get() const noexcept  {return column_helper<T>::get(*this);}
+        /// Implicit conversion to type `T`, for assignment or passing as a parameter.
+        template <typename T> operator T() const noexcept  {return get<T>();}
 
         /// The data type of the column value.
         data_type type() const noexcept;
@@ -404,11 +403,10 @@ namespace sqnice {
         /// The length in bytes of a text or blob value.
         size_t size_bytes() const noexcept;
 
-    private:
-        friend class query::row;
+        // The following are just the specializations of get<T>() ...
 
         template <std::signed_integral T>
-        T get(T) const noexcept {
+        T get() const noexcept {
             if constexpr (sizeof(T) <= sizeof(int))
                 return static_cast<T>(get_int());
             else
@@ -416,38 +414,41 @@ namespace sqnice {
         }
 
         template <std::unsigned_integral T>
-        T get(T) const noexcept {
+        T get() const noexcept {
+            // pin negative values to 0 instead of returning bogus huge numbers
             if constexpr (sizeof(T) < sizeof(int))
                 return static_cast<T>(std::max(0, get_int()));
             else
                 return static_cast<T>(std::max(int64_t(0), get_int64()));
         }
 
-        double get(double) const noexcept;
-        char const* get(char const* _Nullable) const noexcept;
-        std::string get(std::string) const noexcept;
-        std::string_view get(std::string_view) const noexcept;
-        void const* get(void const* _Nullable) const noexcept;
-        bool get(bool) const noexcept                   {return get_int() != 0;}
-        blob get(blob) const noexcept;
-        null_type get(null_type) const noexcept         {return ignore;}
+        template<std::floating_point T>
+        T get() const noexcept                          {return static_cast<T>(get_double());}
 
-        int get_int() const noexcept;
-        int64_t get_int64() const noexcept;
-        double get_double() const noexcept;
+        template<> bool get() const noexcept            {return get_int() != 0;}
+        template<> char const* get() const noexcept;
+        template<> std::string get() const noexcept   {return std::string(get<std::string_view>());}
+        template<> std::string_view get() const noexcept;
+        template<> void const* get() const noexcept;
+        template<> blob get() const noexcept;
+        template<> null_type get() const noexcept       {return ignore;}
+
+        template <columnable T> T get() const noexcept  {return column_helper<T>::get(*this);}
+
+    private:
+        friend class query::row;
 
         column_value(query::row const& r, unsigned idx) noexcept :stmt_(r.stmt_), idx_(idx) { }
         column_value(column_value&&) = delete;
         column_value& operator=(column_value&&) = delete;
 
+        int get_int() const noexcept;
+        int64_t get_int64() const noexcept;
+        double get_double() const noexcept;
+
         sqlite3_stmt*  stmt_;
         int const      idx_;
     };
-
-    column_value query::row::column(unsigned idx) const {return column_value(*this,check_idx(idx));}
-    column_value query::row::operator[] (unsigned idx) const   {return column(idx);}
-    template <class T> T query::row::get(unsigned idx) const   {return column(idx).get<T>();}
-
 
 
     /** A sort of input stream over a query row's columns. Each `>>` stores the next value. */
@@ -502,8 +503,8 @@ namespace sqnice {
     };
 
 
-    query::iterator query::begin()                      {return iterator(this);}
-    query::iterator query::end() noexcept               {return iterator();}
+
+    // some template & method implementations
 
     template <typename T>
     std::optional<T> query::single_value() {
@@ -522,53 +523,12 @@ namespace sqnice {
         }
     }
 
+    column_value query::row::column(unsigned idx) const {return column_value(*this,check_idx(idx));}
+    column_value query::row::operator[] (unsigned idx) const   {return column(idx);}
+    template <class T> T query::row::get(unsigned idx) const   {return column(idx).get<T>();}
 
-#pragma mark - STATEMENT CACHE:
-
-
-    /** A cache of pre-compiled `query` or `command` objects. This has several benefits:
-        * Reusing a compiled statement is faster than compiling a new one.
-        * If you work around this by keeping statement objects around, you have to remember
-          to destruct them all before closing the database, else it doesn't close cleanly;
-          destructing the cache destructs all of them at once. */
-    template <class STMT>
-    class statement_cache {
-    public:
-        explicit statement_cache(database &db) noexcept :db_(db) { }
-
-        /// Compiles a STMT, or returns a copy of an already-compiled one with the same SQL string.
-        /// @warning  If two returned STMTs with the same string are in scope at the same time,
-        ///           they won't work right because they are using the same `sqlite3_stmt`.
-        STMT compile(std::string const& sql) {
-            const STMT* stmt;
-            if (auto i = stmts_.find(sql); i != stmts_.end()) {
-                stmt = &i->second;
-            } else {
-                auto x = stmts_.emplace(std::piecewise_construct,
-                                        std::tuple<std::string>{sql},
-                                        std::tuple<database&,const char*,statement::persistence>{
-                                                db_, sql.c_str(), statement::persistent});
-                stmt = &x.first->second;
-            }
-            return stmt->shared_copy();
-        }
-
-        STMT operator[] (std::string const& sql)        {return compile(std::string(sql));}
-        STMT operator[] (const char *sql)               {return compile(sql);}
-
-        /// Empties the cache, freeing all statements.
-        void clear()                                    {stmts_.clear();}
-
-    private:
-        database&                               db_;
-        std::unordered_map<std::string,STMT>    stmts_;
-    };
-
-    /** A cache of pre-compiled `command` objects. */
-    using command_cache = statement_cache<command>;
-
-    /** A cache of pre-compiled `query` objects. */
-    using query_cache = statement_cache<query>;
+    query::iterator query::begin()                      {return iterator(this);}
+    query::iterator query::end() noexcept               {return iterator();}
 
 }
 

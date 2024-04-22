@@ -26,6 +26,7 @@
 
 #include "sqnice/database.hh"
 #include "sqnice/query.hh"
+#include "sqnice/statement_cache.hh"
 #include <cstring>
 #include <cassert>
 #include <cstdio>

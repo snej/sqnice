@@ -30,10 +30,12 @@
 // Umbrella header that includes [most of] the sqnice headers.
 
 #include "sqnice/base.hh"
-//#include "sqnice/blob_stream.hh"
 #include "sqnice/database.hh"
-//#include "sqnice/functions.hh"
 #include "sqnice/query.hh"
 #include "sqnice/transaction.hh"
+
+//#include "sqnice/blob_stream.hh"
+//#include "sqnice/functions.hh"
+//#include "sqnice/statement_cache.hh"
 
 #endif
