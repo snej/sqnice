@@ -103,7 +103,10 @@ namespace sqnice {
 
 
     void checking::raise(status rc) const {
-        const char* msg = db_.error_msg();
+        raise(rc, db_.error_msg());
+    }
+
+    void checking::raise(status rc, const char* msg) {
         switch (int(rc)) {
             case SQLITE_INTERNAL:
                 throw std::logic_error(msg);
@@ -121,6 +124,16 @@ namespace sqnice {
             default:        
                 throw database_error(msg, rc);
         }
+    }
+
+
+    void checking::log_warning(const char* format, ...) noexcept {
+        va_list args;
+        va_start(args, format);
+        char* message = sqlite3_vmprintf(format, args);
+        va_end(args);
+        sqlite3_log(SQLITE_WARNING, message);
+        sqlite3_free(message);
     }
 
 
@@ -205,10 +218,13 @@ namespace sqnice {
     status database::connect(std::string_view dbname_, open_flags flags, char const* vfs) {
         close();
 
+        if (!!(flags & open_flags::memory) && !(flags & (open_flags::readwrite | open_flags::readonly)))
+            flags |= open_flags::readwrite;
+
         std::string dbname(dbname_);
         // "It is recommended that when a database filename actually does begin with a ":" character
         // you should prefix the filename with a pathname such as "./" to avoid ambiguity."
-        if (dbname.starts_with(":") && !(flags & open_flags::uri))
+        if (dbname.starts_with(":") && dbname != ":memory:" && !(flags & open_flags::uri))
             dbname = "./" + dbname; //FIXME: Is this OK on Windows?
 
         auto rc = status{sqlite3_open_v2(dbname.c_str(), &db_,
@@ -223,7 +239,7 @@ namespace sqnice {
                 } else {
                     message = "can't open database";
                 }
-                throw database_error(message.c_str(), rc);
+                raise(rc, message.c_str());
             } else {
                 (void)sqlite3_close_v2(db_);
             }
@@ -559,13 +575,17 @@ namespace sqnice {
 
 
     void database::set_log_handler(log_handler h) noexcept {
-        lh_ = h;
+        static log_handler sLogHandler;
+
+        sLogHandler = std::move(h);
+        
         auto callback = [](void* p, int errCode, const char* msg) noexcept {
             if ( (errCode & 0xFF) == SQLITE_SCHEMA )
                 return;  // ignore harmless "statement aborts ... database schema has changed"
-            static_cast<database*>(p)->lh_(status(errCode), msg);
+            if (sLogHandler)
+                sLogHandler(status(errCode), msg);
         };
-        sqlite3_config(SQLITE_CONFIG_LOG, (h ? callback : nullptr), this);
+        sqlite3_config(SQLITE_CONFIG_LOG, h ? callback : nullptr, nullptr);
     }
 
     void database::set_busy_handler(busy_handler h) noexcept {

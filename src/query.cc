@@ -46,6 +46,10 @@ namespace sqnice {
 
     null_type ignore;
 
+    static sqlite3_destructor_type as_dtor(copy_semantic cs) {
+        return cs == copy ? SQLITE_TRANSIENT : SQLITE_STATIC;
+    }
+
 
 #pragma mark - STATEMENT:
 
@@ -59,8 +63,6 @@ namespace sqnice {
     }
 
     statement::~statement() noexcept {
-        // finish() can return an error. If you want to check the error, call
-        // finish() explicitly before this object is destructed.
         (void) finish();
     }
 
@@ -87,12 +89,11 @@ namespace sqnice {
     }
 
     status statement::prepare(std::string_view sql, persistence persistence) {
-        if (auto rc = finish(); !ok(rc))
-            return rc;
+        (void)finish();
         return prepare_impl(sql, persistence);
     }
 
-    int statement::bind_parameter_index(const char* name) const {
+    int statement::bind_parameter_index(const char* name) const noexcept {
         return sqlite3_bind_parameter_index(stmt_, name);
     }
 
@@ -103,19 +104,21 @@ namespace sqnice {
             throw std::invalid_argument("unknown binding name");
     }
 
-    status statement::finish() {
+    status statement::finish() noexcept {
         auto rc = status::ok;
         if (stmt_) {
             if (shared_)
-                reset();
+                rc = reset();
             else
                 rc = finish_impl(stmt_);
             stmt_ = nullptr;
         }
-        return check(rc);
+        // "If the most recent evaluation of statement S failed, then sqlite3_finalize(S) returns
+        // the appropriate error code." Since this is not a new error, don't call check().
+        return rc;
     }
 
-    status statement::finish_impl(sqlite3_stmt* stmt) {
+    status statement::finish_impl(sqlite3_stmt* stmt) noexcept {
         return status{sqlite3_finalize(stmt)};
     }
 
@@ -128,7 +131,7 @@ namespace sqnice {
     }
 
     status statement::reset() noexcept {
-        if (!stmt_)
+        if (!stmt_) [[unlikely]]
             return status::ok;
         // "If the most recent call to sqlite3_step ... indicated an error, then sqlite3_reset
         // returns an appropriate error code." 
@@ -167,22 +170,26 @@ namespace sqnice {
 
     status statement::bind(int idx, char const* value, copy_semantic fcopy) {
         return check_bind(sqlite3_bind_text(stmt_, idx, value, int(std::strlen(value)),
-                                       fcopy == copy ? SQLITE_TRANSIENT : SQLITE_STATIC ));
+                                            as_dtor(fcopy)));
     }
 
     status statement::bind(int idx, blob value) {
         return check_bind(sqlite3_bind_blob(stmt_, idx, value.data, int(value.size),
-                                       value.fcopy == copy ? SQLITE_TRANSIENT : SQLITE_STATIC ));
+                                            as_dtor(value.fcopy)));
     }
 
     status statement::bind(int idx, std::span<const std::byte> value, copy_semantic fcopy) {
         return check_bind(sqlite3_bind_blob(stmt_, idx, value.data(), int(value.size_bytes()),
-                                       fcopy == copy ? SQLITE_TRANSIENT : SQLITE_STATIC ));
+                                            as_dtor(fcopy) ));
     }
 
     status statement::bind(int idx, std::string_view value, copy_semantic fcopy) {
         return check_bind(sqlite3_bind_text(stmt_, idx, value.data(), int(value.size()),
-                                       fcopy == copy ? SQLITE_TRANSIENT : SQLITE_STATIC ));
+                                            as_dtor(fcopy) ));
+    }
+
+    status statement::bind_pointer(int idx, void* ptr, const char* type, pointer_destructor dtor) {
+        return check_bind(sqlite3_bind_pointer(stmt_, idx, ptr, type, dtor));
     }
 
     status statement::bind(int idx, nullptr_t) {
@@ -221,16 +228,18 @@ namespace sqnice {
         return sqlite3_column_count(stmt_);
     }
 
-    char const* query::column_name(int idx) const {
-        if (idx < 0 || idx >= column_count())
-            throw std::domain_error("invalid column index");
-        return sqlite3_column_name(stmt_, idx);
+    unsigned query::check_idx(unsigned idx) const {
+        if (idx >= column_count()) [[unlikely]]
+            throw std::invalid_argument("invalid column index");
+        return idx;
     }
 
-    char const* query::column_decltype(int idx) const {
-        if (idx < 0 || idx >= column_count())
-            throw std::domain_error("invalid column index");
-        return sqlite3_column_decltype(stmt_, idx);
+    char const* query::column_name(unsigned idx) const {
+        return sqlite3_column_name(stmt_, check_idx(idx));
+    }
+
+    char const* query::column_decltype(unsigned idx) const {
+        return sqlite3_column_decltype(stmt_, check_idx(idx));
     }
 
 
@@ -241,61 +250,67 @@ namespace sqnice {
         return sqlite3_data_count(stmt_);
     }
 
-    int query::row::column_bytes(int idx) const noexcept {
-        return sqlite3_column_bytes(stmt_, idx);
+    unsigned query::row::check_idx(unsigned idx) const {
+        if (idx >= column_count()) [[unlikely]]
+            throw std::invalid_argument("invalid column index");
+        return idx;
     }
 
-    int query::row::get_int(int idx) const noexcept {
-        return sqlite3_column_int(stmt_, idx);
+    query::row::getstream query::row::getter(unsigned idx) const noexcept {
+        return getstream(this, check_idx(idx));
     }
 
-    long long int query::row::get_int64(int idx) const noexcept {
-        return sqlite3_column_int64(stmt_, idx);
-    }
 
-    double query::row::get(int idx, double) const noexcept {
-        return sqlite3_column_double(stmt_, idx);
-    }
+#pragma mark - QUERY COLUMN VALUE:
 
-    char const* query::row::get(int idx, char const*) const noexcept {
-        return reinterpret_cast<char const*>(sqlite3_column_text(stmt_, idx));
-    }
 
-    std::string query::row::get(int idx, std::string) const noexcept {
-        char const* cstr = get(idx, (char const*)0);
-        if (!cstr)
-            return {};
-        return {cstr, size_t(column_bytes(idx))};
-    }
-
-    std::string_view query::row::get(int idx, std::string_view) const noexcept {
-        char const* cstr = get(idx, (char const*)0);
-        if (!cstr)
-            return {};
-        return {cstr, size_t(column_bytes(idx))};
-    }
-
-    void const* query::row::get(int idx, void const*) const noexcept {
-        return sqlite3_column_blob(stmt_, idx);
-    }
-
-    blob query::row::get(int idx, blob) const noexcept {
-        // It's important to make the calls in this order, so we get the size of the blob value, not the string value.
-        auto data = sqlite3_column_blob(stmt_, idx);
-        auto size = sqlite3_column_bytes(stmt_, idx);
-        return {data, size_t(size), copy};
-    }
-
-    query::row::getstream query::row::getter(int idx) const noexcept {
-        return getstream(this, idx);
+    data_type column_value::type() const noexcept {
+        return data_type{sqlite3_column_type(stmt_, idx_)};
     }
 
     size_t column_value::size_bytes() const noexcept {
-        return sqlite3_column_bytes(row_.stmt_, idx_);
+        return sqlite3_column_bytes(stmt_, idx_);
     }
 
-    data_type column_value::type() const noexcept {
-        return data_type{sqlite3_column_type(row_.stmt_, idx_)};
+    int column_value::get_int() const noexcept {
+        return sqlite3_column_int(stmt_, idx_);
+    }
+
+    long long int column_value::get_int64() const noexcept {
+        return sqlite3_column_int64(stmt_, idx_);
+    }
+
+    double column_value::get(double) const noexcept {
+        return sqlite3_column_double(stmt_, idx_);
+    }
+
+    char const* column_value::get(char const*) const noexcept {
+        return reinterpret_cast<char const*>(sqlite3_column_text(stmt_, idx_));
+    }
+
+    std::string column_value::get(std::string) const noexcept {
+        char const* cstr = get((char const*)0);
+        if (!cstr)
+            return {};
+        return {cstr, size_bytes()};
+    }
+
+    std::string_view column_value::get(std::string_view) const noexcept {
+        char const* cstr = get((char const*)0);
+        if (!cstr)
+            return {};
+        return {cstr, size_bytes()};
+    }
+
+    void const* column_value::get(void const*) const noexcept {
+        return sqlite3_column_blob(stmt_, idx_);
+    }
+
+    blob column_value::get(blob) const noexcept {
+        // It's important to make the calls in this order, so we get the size of the blob value, not the string value.
+        auto data = sqlite3_column_blob(stmt_, idx_);
+        auto size = sqlite3_column_bytes(stmt_, idx_);
+        return {data, size_t(size), copy};
     }
 
 

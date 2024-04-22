@@ -92,7 +92,8 @@ namespace sqnice {
         status prepare(std::string_view sql, persistence = nonpersistent);
 
         /// Tears down the `sqlite3_stmt`. This instance is no longer prepared and can't be used.
-        status finish();
+        /// @returns the status of the evaluation of the statement.
+        status finish() noexcept;
 
         /// True if the statement contains SQL and can be executed.
         bool prepared() const                           {return stmt_ != nullptr;}
@@ -103,6 +104,7 @@ namespace sqnice {
 
         /// Stops the execution of the statement.
         /// @note  This does not clear bindings.
+        /// @returns the status of the evaluation of the statement.
         status reset() noexcept;
 
         /// Clears all the parameter bindings to `NULL`.
@@ -119,7 +121,7 @@ namespace sqnice {
         bindstream binder(int idx = 1);
 
         /// Returns the (1-based) index of a named parameter, or 0 if none exists.
-        int bind_parameter_index(const char* name) const;
+        int bind_parameter_index(const char* name) const noexcept;
 
         /// Returns the (1-based) index of a named parameter, or throws if none exists.
         /// @throws std::invalid_argument
@@ -161,10 +163,19 @@ namespace sqnice {
             return bind_helper(*this, idx, std::forward<T>(v));
         }
 
+        using pointer_destructor = void(*)(void*);
+        status bind_pointer(int idx, void* pointer, const char* type, pointer_destructor);
+
         /// Binds a value to a named parameter.
         template <typename T>
         status bind(char const* name, T&& v)            {
             return bind(check_bind_parameter_index(name), std::forward<T>(v));
+        }
+
+        /// Binds a value to a named parameter, with a copy/nocopy flag.
+        template <typename T>
+        status bind(char const* name, T&& v, copy_semantic cp)            {
+            return bind(check_bind_parameter_index(name), std::forward<T>(v), cp);
         }
 
     protected:
@@ -175,7 +186,7 @@ namespace sqnice {
         ~statement() noexcept;
 
         status prepare_impl(std::string_view stmt, persistence);
-        status finish_impl(sqlite3_stmt* stmt);
+        status finish_impl(sqlite3_stmt* stmt) noexcept;
         status check_bind(int rc);
         status step() noexcept;
         status bind_int(int idx, int value);
@@ -294,11 +305,11 @@ namespace sqnice {
 
         /// The name of the `idx`'th column.
         /// @throws std::domain_error if the index is invalid.
-        char const* column_name(int idx) const;
+        char const* column_name(unsigned idx) const;
 
         /// The declared type of the `idx`th column in the table's schema. (Not generally useful.)
         /// @throws std::domain_error if the index is invalid.
-        char const* column_decltype(int idx) const;
+        char const* column_decltype(unsigned idx) const;
 
         class iterator;
         class row;
@@ -327,17 +338,18 @@ namespace sqnice {
         explicit query(database& db) noexcept               :statement(db) { }
         query(database& db, sqlite3_stmt* stmt) noexcept    :statement(db, stmt) { }
         query shared_copy() const noexcept                  {return query(db_, stmt_);}
+        unsigned check_idx(unsigned idx) const;
     };
 
 
     /** Specializing the struct `sqnice::column_helper<T>` and adding a static method
-        `get(row&, int idx) -> T` allows a query column value to be converted to type T. */
+        `get(row&, unsigned idx) -> T` allows a query column value to be converted to type T. */
     template <typename T> struct column_helper{ };
     template <typename T>
 
     /** The concept `columnable` identifies custom types column values can be converted to. */
-    concept columnable = requires(query::row const& row) {
-        {column_helper<T>::get(row, 1)} -> std::same_as<T>;
+    concept columnable = requires(column_value const& col) {
+        {column_helper<T>::get(col)} -> std::same_as<T>;
     };
 
 
@@ -348,21 +360,18 @@ namespace sqnice {
         /// The number of columns in the row. (Same as `query::column_count`.)
         int column_count() const noexcept;
 
-        /// The length in bytes of a BLOB or a UTF-8 TEXT value.
-        int column_bytes(int idx) const noexcept;
-
-        /// Returns the value of the `idx`th column as C++ type `T`.
-        template <class T> T get(int idx) const         {return get(idx, T());}
-        template <columnable T> T get(int idx) const    {return column_helper<T>::get(*this, idx);}
-
         /// Returns a lightweight object representing a column. This makes it easy to assign a
         /// column value to a variable or pass it as a function argument;
         /// for example: `int n = row[0];` or `sqrt(row[1])`.
-        [[nodiscard]] inline column_value operator[] (int idx) const;
+        [[nodiscard]] inline column_value column(unsigned idx) const;
+        [[nodiscard]] inline column_value operator[] (unsigned idx) const;
+
+        /// Returns the value of the `idx`th column as C++ type `T`.
+        template <class T> T get(unsigned idx) const;
 
         class getstream;
         /// Returns a sort of input stream from which columns can be read using `>>`.
-        getstream getter(int idx = 0) const noexcept;
+        getstream getter(unsigned idx = 0) const noexcept;
 
     private:
         friend class query;
@@ -372,36 +381,9 @@ namespace sqnice {
         row() = default;
         explicit row(sqlite3_stmt* stmt) noexcept       :stmt_(stmt) { }
 
-        template <std::signed_integral T>
-        T get(int idx, T) const {
-            if constexpr (sizeof(T) <= sizeof(int))
-                return static_cast<T>(get_int(idx));
-            else
-                return get_int64(idx);
-        }
-
-        template <std::unsigned_integral T>
-        T get(int idx, T) const {
-            if constexpr (sizeof(T) < sizeof(int))
-                return static_cast<T>(get_int(idx));
-            else
-                return static_cast<T>(get_int64(idx));
-        }
-
-        double get(int idx, double) const noexcept;
-        char const* get(int idx, char const* _Nullable) const noexcept;
-        std::string get(int idx, std::string) const noexcept;
-        std::string_view get(int idx, std::string_view) const noexcept;
-        void const* get(int idx, void const* _Nullable) const noexcept;
-        bool get(int idx, bool) const noexcept          {return get_int(idx) != 0;}
-        blob get(int idx, blob) const noexcept;
-        null_type get(int idx, null_type) const         {return ignore;}
-
-        int get_int(int idx) const noexcept;
-        int64_t get_int64(int idx) const noexcept;
-        double get_double(int idx) const noexcept;
-
     private:
+        unsigned check_idx(unsigned idx) const;
+
         sqlite3_stmt* _Nullable stmt_ = nullptr;
     };
 
@@ -409,26 +391,62 @@ namespace sqnice {
     /** Represents a single column of a query row; returned by `query::row[]`. */
     class column_value : sqnice::noncopyable {
     public:
-        template <typename T>
-        operator T() const                              {return row_.get<T>(idx_);}
+        template <typename T> operator T() const noexcept  {return get<T>();}
 
-        /// The length in bytes of a text or blob value.
-        size_t size_bytes() const noexcept;
+        template <typename T> T get() const noexcept    {return get(T());}
+        template <columnable T> T get() const noexcept  {return column_helper<T>::get(*this);}
 
         /// The data type of the column value.
         data_type type() const noexcept;
         bool not_null() const noexcept                  {return type() != data_type::null;}
         bool is_blob() const noexcept                   {return type() == data_type::blob;}
 
+        /// The length in bytes of a text or blob value.
+        size_t size_bytes() const noexcept;
+
     private:
         friend class query::row;
-        column_value(query::row r, int idx) noexcept :row_(r), idx_(idx) { }
 
-        query::row const    row_;
-        int const           idx_;
+        template <std::signed_integral T>
+        T get(T) const noexcept {
+            if constexpr (sizeof(T) <= sizeof(int))
+                return static_cast<T>(get_int());
+            else
+                return get_int64();
+        }
+
+        template <std::unsigned_integral T>
+        T get(T) const noexcept {
+            if constexpr (sizeof(T) < sizeof(int))
+                return static_cast<T>(std::max(0, get_int()));
+            else
+                return static_cast<T>(std::max(int64_t(0), get_int64()));
+        }
+
+        double get(double) const noexcept;
+        char const* get(char const* _Nullable) const noexcept;
+        std::string get(std::string) const noexcept;
+        std::string_view get(std::string_view) const noexcept;
+        void const* get(void const* _Nullable) const noexcept;
+        bool get(bool) const noexcept                   {return get_int() != 0;}
+        blob get(blob) const noexcept;
+        null_type get(null_type) const noexcept         {return ignore;}
+
+        int get_int() const noexcept;
+        int64_t get_int64() const noexcept;
+        double get_double() const noexcept;
+
+        column_value(query::row const& r, unsigned idx) noexcept :stmt_(r.stmt_), idx_(idx) { }
+        column_value(column_value&&) = delete;
+        column_value& operator=(column_value&&) = delete;
+
+        sqlite3_stmt*  stmt_;
+        int const      idx_;
     };
 
-    column_value query::row::operator[] (int idx) const   {return column_value(*this, idx);}
+    column_value query::row::column(unsigned idx) const {return column_value(*this,check_idx(idx));}
+    column_value query::row::operator[] (unsigned idx) const   {return column(idx);}
+    template <class T> T query::row::get(unsigned idx) const   {return column(idx).get<T>();}
 
 
 
@@ -437,13 +455,13 @@ namespace sqnice {
     public:
         template <class T>
         getstream& operator >> (T& value) {
-            value = row_->get(idx_++, T());
+            value = row_->column(idx_++).get<T>();
             return *this;
         }
 
     private:
         friend class query::row;
-        getstream(row const* rws, int idx) noexcept     :row_(rws), idx_(idx) { }
+        getstream(row const* rws, unsigned idx) noexcept     :row_(rws), idx_(idx) { }
         row const*  row_;
         int         idx_;
     };
@@ -463,7 +481,7 @@ namespace sqnice {
         explicit operator bool() const noexcept         {return rc_ != status::done;}
 
         /// A convenience for accessing a column of the current row.
-        column_value operator[] (int idx) const         {return cur_row_[idx];}
+        column_value operator[] (unsigned idx) const    {return cur_row_[idx];}
 
         ~iterator() noexcept;
 

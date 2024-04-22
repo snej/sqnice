@@ -32,6 +32,10 @@ namespace sqnice {
 
     namespace {
 
+        sqlite3_destructor_type as_dtor(copy_semantic cs) {
+            return cs == copy ? SQLITE_TRANSIENT : SQLITE_STATIC;
+        }
+
         void function_impl(sqlite3_context* ctx, int nargs, sqlite3_value** values) {
             auto f = static_cast<functions::function_handler*>(sqlite3_user_data(ctx));
             context c(ctx, nargs, values);
@@ -109,15 +113,15 @@ namespace sqnice {
     }
 
     void context::result(std::string const& value) {
-        result(value.c_str(), false);
+        result(value.c_str(), copy);
     }
 
-    void context::result(char const* value, bool fcopy) {
-        sqlite3_result_text(ctx_, value, int(std::strlen(value)), fcopy ? SQLITE_TRANSIENT : SQLITE_STATIC);
+    void context::result(char const* value, copy_semantic fcopy) {
+        sqlite3_result_text(ctx_, value, int(std::strlen(value)), as_dtor(fcopy));
     }
 
-    void context::result(void const* value, int n, bool fcopy) {
-        sqlite3_result_blob(ctx_, value, n, fcopy ? SQLITE_TRANSIENT : SQLITE_STATIC );
+    void context::result(void const* value, int n, copy_semantic fcopy) {
+        sqlite3_result_blob(ctx_, value, n, as_dtor(fcopy));
     }
 
     void context::result() {

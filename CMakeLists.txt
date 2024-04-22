@@ -50,7 +50,7 @@ endif()
 add_library( sqnice STATIC
     src/blob_stream.cc
     src/database.cc
-    src/ext.cc
+    src/functions.cc
     src/query.cc
     src/transaction.cc
 )
@@ -75,8 +75,8 @@ add_executable( sqnice_tests
     test/testdisconnect.cpp
     test/testfunction.cpp
     test/testinsert.cpp
-    test/testinsertall.cpp
     test/testselect.cpp
+    test/test_main.cc
 )
 
 target_compile_options( sqnice_tests PRIVATE

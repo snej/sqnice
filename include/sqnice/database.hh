@@ -215,11 +215,7 @@ namespace sqnice {
 
         /** Same as `execute` but uses `printf`-style formatting to produce the SQL string.
             @warning If using `%s`, be **very careful** not to introduce SQL injection attacks! */
-        status executef(char const* sql, ...)
-#ifdef SQNICE_TYPECHECK_EXECUTEF
-                                                __attribute__((__format__ (__printf__, 2, 3)))
-#endif
-        ;
+        status executef(char const* sql, ...)   sqnice_printflike(2, 3);
 
         /// Returns a `command` object that will run the given SQL statement.
         /// @note This object comes from an internal `command_cache`, so subsequent calls with the
@@ -260,11 +256,17 @@ namespace sqnice {
                       backup_handler h,
                       int step_page = 5);
 
+#pragma mark - LOGGING
+
+        using log_handler = std::function<void (status, const char* message)>;
+
+        static void set_log_handler(log_handler) noexcept;
+
+
 #pragma mark - CALLBACKS
 
         // For details, see the SQLite docs for sqlite3_busy_handler(), etc.
 
-        using log_handler = std::function<void (status, const char* message)>;
         using busy_handler = std::function<bool (int attempts)>;
         using commit_handler = std::function<bool ()>;
         using rollback_handler = std::function<void ()>;
@@ -276,7 +278,6 @@ namespace sqnice {
                                                         char const* _Nullable dbName,
                                                         char const* _Nullable triggerOrView)>;
 
-        void set_log_handler(log_handler) noexcept;
         void set_busy_handler(busy_handler) noexcept;
         void set_commit_handler(commit_handler) noexcept;
         void set_rollback_handler(rollback_handler) noexcept;

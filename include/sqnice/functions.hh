@@ -76,7 +76,7 @@ namespace sqnice {
     }
 
 
-    /** The context of a SQLite function call; holds the arguments and result. */
+    /** The context of a SQLite function call. Holds the arguments and result. */
     class context : noncopyable {
     public:
         explicit context(sqlite3_context* ctx, int nargs = 0, sqlite3_value** values = nullptr);
@@ -89,12 +89,13 @@ namespace sqnice {
             return get(idx, T());
         }
 
+        //TODO: Make this work the same way as statement::bind
         void result(int value);
         void result(double value);
         void result(long long int value);
         void result(std::string const& value);
-        void result(char const* value, bool fcopy);
-        void result(void const* value, int n, bool fcopy);
+        void result(char const* value, copy_semantic = copy);
+        void result(void const* value, int n, copy_semantic = copy);
         void result();
         void result(null_type);
         void result_copy(int idx);
@@ -120,6 +121,7 @@ namespace sqnice {
         void* user_data();
 
     private:
+        //TODO: Make this work the same way as query::row::get()
         int get(int idx, int) const;
         double get(int idx, double) const;
         long long int get(int idx, long long int) const;

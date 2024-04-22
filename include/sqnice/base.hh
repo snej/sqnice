@@ -46,6 +46,12 @@
 #  endif
 #endif
 
+#ifdef SQNICE_TYPECHECK_FORMAT
+#  define sqnice_printflike(A, B) __attribute__((__format__ (__printf__, A, B)))
+#else
+#  define sqnice_printflike(A, B)
+#endif
+
 ASSUME_NONNULL_BEGIN
 
 namespace sqnice {
@@ -54,15 +60,16 @@ namespace sqnice {
 
     /** A SQLite error code. Values are the same as `SQLITE_OK`, `SQLITE_ERROR`, ... */
     enum class status : int {
-        ok          =  0,     corrupt     =  11,
-        error       =  1,     cantopen    =  14,
-        perm        =  3,     constraint  =  19,
-        abort       =  4,     mismatch    =  20,
-        busy        =  5,     misuse      =  21,
-        locked      =  6,     auth        =  23,
-        readonly    =  8,     range       =  25,
-        interrupt   =  9,     row         = 100,
-        ioerr       = 10,     done        = 101,
+        ok          =  0,   cantopen    =  14,
+        error       =  1,   constraint  =  19,
+        perm        =  3,   mismatch    =  20,
+        abort       =  4,   misuse      =  21,
+        busy        =  5,   auth        =  23,
+        locked      =  6,   range       =  25,
+        readonly    =  8,   notice      =  27,
+        interrupt   =  9,   warning     =  28,
+        ioerr       = 10,   row         = 100,
+        corrupt     = 11,   done        = 101,
     };
 
     /// Masks out other bits set in extended status codes
@@ -103,9 +110,9 @@ namespace sqnice {
         /// Enables or disables exceptions.
         /// For a `database`, this defaults to true.
         /// For other objects, it defaults to the value in the `database` they are created from.
-        void exceptions(bool x)     {exceptions_ = x;}
+        void exceptions(bool x) noexcept                {exceptions_ = x;}
         /// True if exceptions are enabled.
-        bool exceptions()           {return exceptions_;}
+        bool exceptions() const noexcept                {return exceptions_;}
 
         /// If `rc` is not OK, and exceptions are enabled, calls `raise(rc)`. Else returns it.
         status check(status rc) const;
@@ -114,13 +121,16 @@ namespace sqnice {
         /// but could be `std::invalid_argument`, `std::bad_alloc` or `std::logic_error`.
         /// @warning Do not pass `status::ok`! If this might not be an error, call `check`.
         [[noreturn]] void raise(status rc) const;
+        [[noreturn]] static void raise(status rc, const char* msg);
 
         static constexpr bool kExceptionsByDefault = true;
-        
+
+        static void log_warning(const char* format, ...) noexcept  sqnice_printflike(1, 2);
+
     protected:
-        checking(database &db, bool x)              :db_(db), exceptions_(x) { }
+        checking(database &db, bool x)                  :db_(db), exceptions_(x) { }
         explicit checking(database &db);
-        status check(int rc) const                  {return check(status{rc});}
+        status check(int rc) const                      {return check(status{rc});}
 
         database&   db_;
         bool        exceptions_;
