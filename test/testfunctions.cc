@@ -11,18 +11,18 @@ namespace {
 
     void test1(sqnice::context& ctx)
     {
-        ctx.result(200);
+        ctx.result = 200;
     }
 
     void test2(sqnice::context& ctx)
     {
-        std::string args = ctx.get<std::string>(0);
-        ctx.result(args);
+        std::string args = ctx.argv[0];
+        ctx.result = args;
     }
 
     void test3(sqnice::context& ctx)
     {
-        ctx.result_copy(0);
+        ctx.result = ctx.argv[0];
     }
 
     std::string test6(std::string const& s1, std::string const& s2, std::string const& s3)
