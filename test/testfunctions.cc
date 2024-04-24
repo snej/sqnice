@@ -148,8 +148,8 @@ namespace {
 }
 
 TEST_CASE_METHOD(sqnice_test, "SQNice aggregate", "[sqnice]") {
-    sqnice::aggregates aggr(db);
-    aggr.create<strlen_aggr, string>("strlen_aggr");
+    sqnice::functions aggr(db);
+    aggr.create_aggregate<strlen_aggr, string>("strlen_aggr");
 
     db.execute("INSERT INTO contacts (name, phone) VALUES ('Mike', '555-1234')");
     db.execute("INSERT INTO contacts (name, phone) VALUES ('Janette', '555-4321')");
@@ -164,12 +164,12 @@ TEST_CASE("SQNice aggregate functions", "[.sqnice]") {
     //FIXME: Needs a pre-populated database
     sqnice::database db("foods.db", sqnice::open_flags::readonly);
 
-    sqnice::aggregates aggr(db);
-    aggr.create<mysum<string>, string>("a2");
-    aggr.create<mysum<int>, int>("a3");
-    aggr.create<mycnt>("a4");
-    aggr.create<strcnt, string>("a5");
-    aggr.create<plussum, int, int>("a6");
+    sqnice::functions aggr(db);
+    aggr.create_aggregate<mysum<string>, string>("a2");
+    aggr.create_aggregate<mysum<int>, int>("a3");
+    aggr.create_aggregate<mycnt>("a4");
+    aggr.create_aggregate<strcnt, string>("a5");
+    aggr.create_aggregate<plussum, int, int>("a6");
 
     sqnice::query qry(db, "SELECT a2(type_id), a3(id), a4(), a5(name), sum(type_id), a6(id, type_id) FROM foods");
 

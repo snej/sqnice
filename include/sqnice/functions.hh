@@ -37,6 +37,8 @@
 #include <type_traits>
 #include <utility>
 
+ASSUME_NONNULL_BEGIN
+
 struct sqlite3_context;
 struct sqlite3_value;
 
@@ -79,7 +81,9 @@ namespace sqnice {
     /** The context of a SQLite function call. Holds the arguments and result. */
     class context : noncopyable {
     public:
-        explicit context(sqlite3_context* ctx, int nargs = 0, sqlite3_value** values = nullptr);
+        using argv_t = sqlite3_value* _Nonnull * _Nullable;
+
+        explicit context(sqlite3_context* ctx, int nargs = 0, argv_t values = nullptr);
 
         int args_count() const;
         int args_bytes(int idx) const;
@@ -94,7 +98,7 @@ namespace sqnice {
         void result(double value);
         void result(long long int value);
         void result(std::string const& value);
-        void result(char const* value, copy_semantic = copy);
+        void result(char const* _Nullable value, copy_semantic = copy);
         void result(void const* value, int n, copy_semantic = copy);
         void result();
         void result(null_type);
@@ -104,7 +108,7 @@ namespace sqnice {
         void* aggregate_data(int size);
 
         template <class T>
-        T* aggregate_state() {
+        T* _Nonnull aggregate_state() {
             auto data = static_cast<uint8_t*>(aggregate_data(sizeof(T) + 1));
             if (!data[sizeof(T)]) { // last byte tracks whether T has been constructed
                 new (data) T;
@@ -125,9 +129,9 @@ namespace sqnice {
         int get(int idx, int) const;
         double get(int idx, double) const;
         long long int get(int idx, long long int) const;
-        char const* get(int idx, char const*) const;
+        char const* get(int idx, char const* _Nullable) const;
         std::string get(int idx, std::string) const;
-        void const* get(int idx, void const*) const;
+        void const* get(int idx, void const* _Nullable) const;
 
         template<class H, class... Ts>
         static inline std::tuple<H, Ts...> to_tuple_impl(int index, const context& c, std::tuple<H, Ts...>&&) {
@@ -140,13 +144,13 @@ namespace sqnice {
 
     private:
         sqlite3_context* ctx_;
-        int nargs_;
-        sqlite3_value** values_;
+        int              nargs_;
+        argv_t           values_;
     };
 
     namespace {
         template <class R, class... Ps>
-        void functionx_impl(sqlite3_context* ctx, int nargs, sqlite3_value** values) {
+        void functionx_impl(sqlite3_context* ctx, int nargs, context::argv_t values) {
             context c(ctx, nargs, values);
             auto f = static_cast<std::function<R (Ps...)>*>(c.user_data());
             c.result(apply_f(*f, c.to_tuple<Ps...>()));
@@ -166,8 +170,18 @@ namespace sqnice {
 
         template <class F>
         status create(char const* name, std::function<F> h) {
+            auto db = check_get_db();
             fh_[name] = std::shared_ptr<void>(new std::function<F>(h));
-            return create_function_impl<F>()(db_, fh_[name].get(), name);
+            return create_function_impl<F>()(this, fh_[name].get(), name);
+        }
+
+        status create_aggregate(char const* name, function_handler s, function_handler f, int nargs);
+
+        template <class T, class... Ps>
+        status create_aggregate(char const* name) {
+            auto db = check_get_db();
+            return register_function(db, name, sizeof...(Ps), 0, nullptr,
+                                     stepx_impl<T, Ps...>, finishN_impl<T>);
         }
 
     private:
@@ -177,35 +191,12 @@ namespace sqnice {
 
         template<class R, class... Ps>
         struct create_function_impl<R (Ps...)> {
-            status operator()(database& db, void* fh, char const* name) {
-                return db.create_function(name, sizeof...(Ps), fh, functionx_impl<R, Ps...>);
+            status operator()(functions* fns, void* fh, char const* name) {
+                return fns->register_function(fns->check_get_db(), name, sizeof...(Ps), fh, functionx_impl<R, Ps...>);
             }
         };
-
-    private:
-        std::map<std::string, pfunction_base> fh_;
-    };
-
-
-    /** Manages user-defined aggregate functions for a database. */
-    class aggregates : public checking, noncopyable {
-    public:
-        using function_handler = std::function<void (context&)>;
-        using pfunction_base = std::shared_ptr<void>;
-
-        explicit aggregates(database& db) : checking(db) { }
-
-        status create(char const* name, function_handler s, function_handler f, int nargs);
-
         template <class T, class... Ps>
-        status create(char const* name) {
-            return db_.create_function(name, sizeof...(Ps), 0, nullptr,
-                                       stepx_impl<T, Ps...>, finishN_impl<T>);
-        }
-
-    private:
-        template <class T, class... Ps>
-        static void stepx_impl(sqlite3_context* ctx, int nargs, sqlite3_value** values) {
+        static void stepx_impl(sqlite3_context* ctx, int nargs, context::argv_t values) {
             context c(ctx, nargs, values);
             T* t = c.aggregate_state<T>();
             apply_f([](T* tt, Ps... ps){tt->step(ps...);},
@@ -220,9 +211,22 @@ namespace sqnice {
             t->~T();
         }
 
+        using callFn = void (*)(sqlite3_context*, int, sqlite3_value *_Nonnull*_Nonnull);
+        using finishFn = void (*)(sqlite3_context*);
+        using destroyFn = void (*)(void*);
+        status register_function(std::shared_ptr<sqlite3> const&,
+                                 const char *name, int nArg, void* _Nullable pApp,
+                                 callFn _Nullable call,
+                                 callFn _Nullable step = nullptr,
+                                 finishFn _Nullable finish = nullptr,
+                                 destroyFn _Nullable destroy = nullptr);
+    private:
         std::map<std::string, std::pair<pfunction_base, pfunction_base> > ah_;
+        std::map<std::string, pfunction_base> fh_;
     };
 
 } // namespace sqnice
+
+ASSUME_NONNULL_END
 
 #endif

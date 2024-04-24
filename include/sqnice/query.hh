@@ -35,6 +35,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <cassert>
 
 ASSUME_NONNULL_BEGIN
 
@@ -82,7 +83,7 @@ namespace sqnice {
 
 
     /** Abstract base class of `command` and `query`. */
-    class statement : public checking, noncopyable {
+    class statement : public checking {
     public:
         enum persistence {nonpersistent, persistent};
 
@@ -90,11 +91,10 @@ namespace sqnice {
         status prepare(std::string_view sql, persistence = nonpersistent);
 
         /// Tears down the `sqlite3_stmt`. This instance is no longer prepared and can't be used.
-        /// @returns the status of the evaluation of the statement.
-        status finish() noexcept;
+        void finish() noexcept;
 
         /// True if the statement contains SQL and can be executed.
-        bool prepared() const                           {return stmt_ != nullptr;}
+        bool prepared() const                           {return impl_ != nullptr;}
         explicit operator bool() const                  {return prepared();}
 
         /// True if the statement is running; `reset` clears this.
@@ -102,11 +102,10 @@ namespace sqnice {
 
         /// Stops the execution of the statement.
         /// @note  This does not clear bindings.
-        /// @returns the status of the evaluation of the statement.
-        status reset() noexcept;
+        void reset() noexcept;
 
         /// Clears all the parameter bindings to `NULL`.
-        status clear_bindings();
+        void clear_bindings();
 
         class bindref;
         /// A reference to the `idx`'th parameter; assign a value to bind it.
@@ -176,17 +175,45 @@ namespace sqnice {
             return bind(check_parameter_index(name), std::forward<T>(v), cp);
         }
 
+        sqlite3_stmt* stmt() const;
+        sqlite3_stmt* any_stmt() const;
+
+        statement(statement const&) noexcept;
+        statement& operator=(statement const&) noexcept;
+        statement(statement&&) noexcept;
+        statement& operator=(statement&&) noexcept;
+
     protected:
-        explicit statement(database& db) noexcept       :checking(db) { }
-        statement(database& db, sqlite3_stmt* stmt) noexcept :checking(db),stmt_(stmt),shared_(!!stmt) {}
-        statement(database& db, std::string_view sql, persistence);
-        statement(statement&&) = default;
+        class impl {
+        public:
+            explicit impl(sqlite3_stmt* s)              :stmt(s) { }
+            ~impl();
+            bool owned() const                          {return owner_ != nullptr;}
+            bool owned_by(const void* o) const          {return owner_ == o;}
+            bool set_owner(const void* _Nullable newOwner) {
+                return newOwner == owner_ || transfer_owner(nullptr, newOwner);
+            }
+            bool transfer_owner(const void* _Nullable oldOwner, const void* _Nullable newOwner) {
+                if (owner_ == oldOwner) {
+                    owner_ = newOwner;
+                    return true;
+                } else {
+                    return false;
+                }
+            }
+
+            sqlite3_stmt* const   stmt;
+        private:
+            const void* _Nullable owner_ = nullptr;
+        };
+
+        explicit statement(checking& ck) noexcept       :checking(ck) { }
+        explicit statement(checking&, std::shared_ptr<impl> impl) noexcept;
+        statement(checking&, std::string_view sql, persistence);
         ~statement() noexcept;
 
-        status prepare_impl(std::string_view stmt, persistence);
-        status finish_impl(sqlite3_stmt* stmt) noexcept;
+        std::shared_ptr<impl> give_impl(const void* _Nullable newOwner = nullptr);
         status check_bind(int rc);
-        status step() noexcept;
         status bind_int(int idx, int value);
         status bind_int64(int idx, int64_t value);
         status bind_uint64(int idx, uint64_t value);
@@ -199,9 +226,8 @@ namespace sqnice {
                 _bind_args(idx + 1, rest...);
         }
 
-    protected:
-        sqlite3_stmt* _Nullable stmt_ = nullptr;
-        bool                    shared_ = false;
+    private:
+        std::shared_ptr<impl> impl_;
     };
 
 
@@ -243,8 +269,8 @@ namespace sqnice {
     public:
         /// Creates a command, compiling the SQL string.
         /// @throws database_error if the SQL is invalid.
-        command(database& db, std::string_view sql, persistence = nonpersistent)
-            :statement(db, sql, persistent) { }
+        command(checking& ck, std::string_view sql, persistence = nonpersistent)
+            :statement(ck, sql, persistent) { }
 
         /// Executes the statement.
         /// @note  To get the rowid of an INSERT, call `last_insert_rowid`.
@@ -268,16 +294,14 @@ namespace sqnice {
         }
 
         /// The last rowid inserted by this command, after executing it.
-        int64_t last_insert_rowid() const noexcept;
+        int64_t last_insert_rowid() const noexcept          {return last_rowid_;}
 
         /// The number of rows changed by this command, after executing it.
-        int changes() const noexcept;
+        int changes() const noexcept                        {return changes_;}
 
     private:
-        template <class STMT> friend class statement_cache;
-        explicit command(database& db) noexcept              :statement(db) { }
-        command(database& db, sqlite3_stmt* stmt) noexcept   :statement(db, stmt) {clear_bindings();}
-        command shared_copy() const noexcept                 {return command(db_, stmt_);}
+        int64_t last_rowid_ = -1;
+        int     changes_ = 0;
     };
 
 
@@ -286,7 +310,7 @@ namespace sqnice {
     public:
         /// Creates a command, compiling the SQL string.
         /// @throws database_error if the SQL is invalid.
-        query(database& db, std::string_view sql, persistence = nonpersistent)
+        query(checking& db, std::string_view sql, persistence = nonpersistent)
             :statement(db, sql, persistent) { }
 
         /// Binds its arguments to multiple query parameters starting at index 1.
@@ -332,10 +356,6 @@ namespace sqnice {
         template <> blob single_value_or(blob const&) = delete;
 
     private:
-        template <class STMT> friend class statement_cache;
-        explicit query(database& db) noexcept               :statement(db) { }
-        query(database& db, sqlite3_stmt* stmt) noexcept    :statement(db, stmt) { }
-        query shared_copy() const noexcept                  {return query(db_, stmt_);}
         unsigned check_idx(unsigned idx) const;
     };
 
@@ -497,7 +517,7 @@ namespace sqnice {
         iterator() = default;
         explicit iterator(query*);
 
-        query* _Nullable    query_  {0};
+        std::shared_ptr<statement::impl> impl_;
         status              rc_     {status::done};
         row                 cur_row_;
     };

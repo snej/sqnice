@@ -29,6 +29,7 @@
 #include <cstring>
 
 namespace sqnice {
+    using namespace std;
 
     namespace {
 
@@ -43,15 +44,15 @@ namespace sqnice {
         }
 
         void step_impl(sqlite3_context* ctx, int nargs, sqlite3_value** values) {
-            auto p = static_cast<std::pair<aggregates::pfunction_base, aggregates::pfunction_base>*>(sqlite3_user_data(ctx));
-            auto s = static_cast<aggregates::function_handler*>((*p).first.get());
+            auto p = static_cast<std::pair<functions::pfunction_base, functions::pfunction_base>*>(sqlite3_user_data(ctx));
+            auto s = static_cast<functions::function_handler*>((*p).first.get());
             context c(ctx, nargs, values);
             ((functions::function_handler&)*s)(c);
         }
 
         void finalize_impl(sqlite3_context* ctx) {
-            auto p = static_cast<std::pair<aggregates::pfunction_base, aggregates::pfunction_base>*>(sqlite3_user_data(ctx));
-            auto f = static_cast<aggregates::function_handler*>((*p).second.get());
+            auto p = static_cast<std::pair<functions::pfunction_base, functions::pfunction_base>*>(sqlite3_user_data(ctx));
+            auto f = static_cast<functions::function_handler*>((*p).second.get());
             context c(ctx);
             ((functions::function_handler&)*f)(c);
         }
@@ -148,15 +149,43 @@ namespace sqnice {
         return sqlite3_user_data(ctx_);
     }
 
-    status functions::create(char const* name, function_handler h, int nargs) {
-        fh_[name] = pfunction_base(new function_handler(h));
-        return db_.create_function(name, nargs, fh_[name].get(), function_impl);
+    using callFn = void (*)(sqlite3_context*, int, sqlite3_value *_Nonnull*_Nonnull);
+    using finishFn = void (*)(sqlite3_context*);
+    using destroyFn = void (*)(void*);
+
+
+    status functions::register_function(std::shared_ptr<sqlite3> const& db,
+                                        const char *name, int nArgs, void* _Nullable pApp,
+                                        callFn _Nullable call,
+                                        callFn _Nullable step,
+                                        finishFn _Nullable finish,
+                                        destroyFn _Nullable destroy) {
+        return check( sqlite3_create_function_v2(db.get(), name, nArgs, SQLITE_UTF8,
+                                                 pApp, call, step, finish, destroy) );
     }
 
-    status aggregates::create(char const* name, function_handler s, function_handler f, int nargs) {
-        ah_[name] = std::make_pair(pfunction_base(new function_handler(s)), pfunction_base(new function_handler(f)));
-        return db_.create_function(name, nargs, &ah_[name],
-                                   nullptr, step_impl, finalize_impl);
+
+    status functions::create(char const* name,
+                             function_handler h,
+                             int nargs)
+    {
+        shared_ptr<sqlite3> db = check_get_db();
+        fh_[name] = pfunction_base(new function_handler(h));
+        return register_function(db, name, nargs,
+                                 (void*)fh_[name].get(), function_impl,
+                                 nullptr, nullptr, nullptr);
+    }
+
+    status functions::create_aggregate(char const* name, 
+                                       function_handler s, function_handler f,
+                                       int nargs)
+    {
+        shared_ptr<sqlite3> db = check_get_db();
+        ah_[name] = std::make_pair(pfunction_base(new function_handler(s)),
+                                   pfunction_base(new function_handler(f)));
+        return register_function(db, name, nargs,
+                                 (void*)&ah_[name], nullptr,
+                                 step_impl, finalize_impl, nullptr);
     }
 
 } // namespace sqnice

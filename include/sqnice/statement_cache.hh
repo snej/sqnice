@@ -46,9 +46,9 @@ namespace sqnice {
         to use this template directly. */
         
     template <class STMT>
-    class statement_cache {
+    class statement_cache : public checking {
     public:
-        explicit statement_cache(database &db) noexcept :db_(db) { }
+        explicit statement_cache(database &db) noexcept :checking(db) { }
 
         /// Compiles a STMT, or returns a copy of an already-compiled one with the same SQL string.
         /// @warning  If two returned STMTs with the same string are in scope at the same time,
@@ -60,11 +60,11 @@ namespace sqnice {
             } else {
                 auto x = stmts_.emplace(std::piecewise_construct,
                                         std::tuple<std::string>{sql},
-                                        std::tuple<database&,const char*,statement::persistence>{
-                                                db_, sql.c_str(), statement::persistent});
+                                        std::tuple<checking&,const char*,statement::persistence>{
+                                                *this, sql.c_str(), statement::persistent});
                 stmt = &x.first->second;
             }
-            return stmt->shared_copy();
+            return *stmt;
         }
 
         STMT operator[] (std::string const& sql)        {return compile(std::string(sql));}
@@ -74,7 +74,6 @@ namespace sqnice {
         void clear()                                    {stmts_.clear();}
 
     private:
-        database&                               db_;
         std::unordered_map<std::string,STMT>    stmts_;
     };
 

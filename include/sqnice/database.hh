@@ -29,6 +29,7 @@
 
 #include "sqnice/base.hh"
 #include <functional>
+#include <memory>
 
 ASSUME_NONNULL_BEGIN
 
@@ -81,6 +82,10 @@ namespace sqnice {
     };
 
 
+    using db_handle = std::shared_ptr<sqlite3>;
+    using db_weak_ref = std::weak_ptr<sqlite3>;
+
+
     /** A SQLite database connection. */
     class database : public checking, noncopyable {
     public:
@@ -106,10 +111,9 @@ namespace sqnice {
         /// You must call `connect` before doing anything else with it.
         database() noexcept;
 
+        database(database&& db) noexcept;
+        database& operator=(database&& db) noexcept;
         ~database() noexcept;
-        // Moving a database object is forbidden because other nicepp objects point to it.
-        database(database&& db) = delete;
-        database& operator=(database&& db) = delete;
 
         /// Closes any existing connection and opens a new database file.
         status connect(std::string_view filename,
@@ -141,7 +145,9 @@ namespace sqnice {
         bool writeable() const noexcept;
 
         /// The raw SQLite database handle, for use if you need to call a SQLite API yourself.
-        sqlite3* handle() const                         {return db_;}
+        sqlite3* handle() const noexcept                {return db_.get();}
+        sqlite3* check_handle() const;
+
 
 #pragma mark - CONFIGURATION:
 
@@ -299,21 +305,12 @@ namespace sqnice {
     private:
         friend class aggregates;
         friend class blob_stream;
+        friend class checking;
         friend class functions;
         friend class statement;
 
-        using callFn = void (*)(sqlite3_context*, int, sqlite3_value *_Nonnull*_Nonnull);
-        using finishFn = void (*)(sqlite3_context*);
-        using destroyFn = void (*)(void*);
-        status create_function(const char *name, int nArg, void* _Nullable pApp,
-                               callFn _Nullable call,
-                               callFn _Nullable step = nullptr,
-                               finishFn _Nullable finish = nullptr,
-                               destroyFn _Nullable destroy = nullptr);
-
     private:
-        sqlite3* _Nullable  db_ = nullptr;
-        bool                borrowing_ = false;
+        db_handle           db_;
         int                 txn_depth_ = 0;
         bool                txn_immediate_ = false;
         std::unique_ptr<statement_cache<sqnice::command>> commands_;

@@ -27,12 +27,13 @@
 #ifndef SQNICE_BASE_H
 #define SQNICE_BASE_H
 
+#include <memory>
+#include <stdexcept>
+
 #define SQNICE_VERSION "2.0.0"
 #define SQNICE_VERSION_MAJOR 2
 #define SQNICE_VERSION_MINOR 0
 #define SQNICE_VERSION_PATCH 0
-
-#include <stdexcept>
 
 #if __has_feature(nullability)
 #  define ASSUME_NONNULL_BEGIN  _Pragma("clang assume_nonnull begin")
@@ -53,6 +54,8 @@
 #endif
 
 ASSUME_NONNULL_BEGIN
+
+struct sqlite3;
 
 namespace sqnice {
     class checking;
@@ -128,12 +131,16 @@ namespace sqnice {
         static void log_warning(const char* format, ...) noexcept  sqnice_printflike(1, 2);
 
     protected:
-        checking(database &db, bool x)                  :db_(db), exceptions_(x) { }
+        checking(std::weak_ptr<sqlite3> db, bool x)     :weak_db_(std::move(db)), exceptions_(x) { }
         explicit checking(database &db);
+        explicit checking(bool x)                       :exceptions_(x) { }
         status check(int rc) const                      {return check(status{rc});}
 
-        database&   db_;
-        bool        exceptions_;
+        std::shared_ptr<sqlite3> get_db() const noexcept {return weak_db_.lock();}
+        std::shared_ptr<sqlite3> check_get_db() const;
+
+        std::weak_ptr<sqlite3> weak_db_;
+        bool                   exceptions_;
     };
 
 }

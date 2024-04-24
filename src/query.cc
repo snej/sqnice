@@ -36,6 +36,7 @@ SQLITE_EXTENSION_INIT1
 #endif
 
 namespace sqnice {
+    using namespace std;
 
     static_assert(int(data_type::integer)       == SQLITE_INTEGER);
     static_assert(int(data_type::floating_point)== SQLITE_FLOAT);
@@ -54,93 +55,152 @@ namespace sqnice {
 #pragma mark - STATEMENT:
 
 
-    statement::statement(database& db, std::string_view stmt, persistence persistence)
-    : statement(db)
+    statement::impl::~impl()    {
+        sqlite3_finalize(stmt);
+    }
+
+
+    statement::statement(checking& ck, std::shared_ptr<impl> impl) noexcept
+    :checking(ck),
+    impl_(std::move(impl))
+    { }
+
+
+    statement::statement(checking& ck, std::string_view stmt, persistence persistence)
+    :statement(ck)
     {
         exceptions_ = true;
-        prepare_impl(stmt, persistence);
-        exceptions_ = db.exceptions();
+        prepare(stmt, persistence);
+        exceptions_ = ck.exceptions();
     }
+
+    statement::statement(statement const& other) noexcept
+    :checking(other)
+    ,impl_(other.impl_)
+    { 
+        clear_bindings();
+    }
+
+    statement& statement::operator=(statement const& other) noexcept {
+        if (this != &other) {
+            finish();
+            this->checking::operator=(other);
+            impl_ = other.impl_;
+            clear_bindings();
+        }
+        return *this;
+    }
+
+
+    statement::statement(statement&& other) noexcept
+    :checking(std::move(other))
+    ,impl_(std::move(other.impl_))
+    {
+        impl_->transfer_owner(&other, this);
+    }
+
+    statement& statement::operator=(statement&& other) noexcept {
+        if (this != &other) {
+            finish();
+            this->checking::operator=(std::move(other));
+            impl_ = std::move(other.impl_);
+            impl_->transfer_owner(&other, this);
+        }
+        return *this;
+    }
+
 
     statement::~statement() noexcept {
         (void) finish();
     }
 
-    status statement::prepare_impl(std::string_view sql, persistence persistence) {
-        assert(!stmt_);
-        shared_ = false;
+    status statement::prepare(std::string_view sql, persistence persistence) {
+        sqlite3_stmt* stmt = nullptr;
         const char* tail = nullptr;
         unsigned flags = (persistence ? SQLITE_PREPARE_PERSISTENT : 0);
-        auto rc = status{sqlite3_prepare_v3(db_.db_, sql.data(), int(sql.size()), flags, &stmt_, &tail)};
+        auto db = check_get_db();
+        auto rc = status{sqlite3_prepare_v3(db.get(), sql.data(), int(sql.size()), flags,
+                                            &stmt, &tail)};
         if (ok(rc) && tail != nullptr && tail < sql.data() + sql.size()) {
             // Multiple statements are not supported.
-            finish_impl(stmt_);
-            stmt_ = nullptr;
+            sqlite3_finalize(stmt);
             if (exceptions_)
                 throw std::invalid_argument("multiple SQL statements are not allowed");
             rc = status::error;
         } else if (rc == status::error && exceptions_) {
             // Throw a better exception:
-            std::string message(db_.error_msg());
+            std::string message(sqlite3_errmsg(db.get()));
             message += ", in SQL statement \"" + std::string(sql) + "\"";
             throw std::invalid_argument(message);
+        } else if (ok(rc)) {
+            finish();
+            impl_ = shared_ptr<impl>(new impl(stmt));
         }
         return check(rc);
     }
 
-    status statement::prepare(std::string_view sql, persistence persistence) {
-        (void)finish();
-        return prepare_impl(sql, persistence);
-    }
-
     int statement::parameter_index(const char* name) const noexcept {
-        return sqlite3_bind_parameter_index(stmt_, name);
+        return sqlite3_bind_parameter_index(any_stmt(), name);
     }
 
     int statement::check_parameter_index(const char* name) const {
-        if (int idx = sqlite3_bind_parameter_index(stmt_, name); idx >= 1)
+        if (int idx = sqlite3_bind_parameter_index(any_stmt(), name); idx >= 1)
             return idx;
         else [[unlikely]]
             throw std::invalid_argument("unknown binding name");
     }
 
-    status statement::finish() noexcept {
-        auto rc = status::ok;
-        if (stmt_) {
-            if (shared_)
-                rc = reset();
-            else
-                rc = finish_impl(stmt_);
-            stmt_ = nullptr;
+    void statement::finish() noexcept {
+        if (impl_) {
+            if (impl_->transfer_owner(this, nullptr))
+                sqlite3_reset(impl_->stmt);
+            impl_ = nullptr;
         }
-        // "If the most recent evaluation of statement S failed, then sqlite3_finalize(S) returns
-        // the appropriate error code." Since this is not a new error, don't call check().
-        return rc;
     }
 
-    status statement::finish_impl(sqlite3_stmt* stmt) noexcept {
-        return status{sqlite3_finalize(stmt)};
+
+    // Lets another object use the impl.
+    // Throws if I have none, or someone else is already using it.
+    shared_ptr<statement::impl> statement::give_impl(const void* newOwner) {
+        if (!impl_) [[unlikely]]
+            throw logic_error("command or query is not prepared");
+        else if (impl_->transfer_owner(nullptr, newOwner) || impl_->transfer_owner(this, newOwner))
+            return impl_;
+        else
+            throw logic_error("command or query is in use by another iterator");
     }
 
-    status statement::step() noexcept {
-        return status{sqlite3_step(stmt_)};
+
+    sqlite3_stmt* statement::any_stmt() const {
+        if (!impl_) [[unlikely]]
+            throw logic_error("command or query is not prepared");
+        else
+            return impl_->stmt;
+    }
+
+    sqlite3_stmt* statement::stmt() const {
+        if (!impl_) [[unlikely]]
+            throw logic_error("command or query is not prepared");
+        else if (impl_->set_owner(this)) [[likely]]
+            return impl_->stmt;
+        else
+            throw logic_error("command or query is in use by an iterator");
     }
 
     bool statement::busy() const noexcept {
-        return stmt_ && sqlite3_stmt_busy(stmt_);
+        return impl_ && sqlite3_stmt_busy(impl_->stmt);
     }
 
-    status statement::reset() noexcept {
-        if (!stmt_) [[unlikely]]
-            return status::ok;
-        // "If the most recent call to sqlite3_step ... indicated an error, then sqlite3_reset
-        // returns an appropriate error code." 
-        // Since this is not a new error, don't call check().
-        return status{sqlite3_reset(stmt_)};
+    void statement::reset() noexcept {
+        if (impl_) [[likely]] {
+            sqlite3_reset(stmt());
+            impl_->transfer_owner(this, nullptr);
+        }
     }
 
-    status statement::clear_bindings() {
-        return check(sqlite3_clear_bindings(stmt_));
+    void statement::clear_bindings() {
+        if (impl_) [[likely]]
+            sqlite3_clear_bindings(stmt());
     }
 
     status statement::check_bind(int rc) {
@@ -151,15 +211,15 @@ namespace sqnice {
     }
 
     status statement::bind_int(int idx, int value) {
-        return check_bind(sqlite3_bind_int(stmt_, idx, value));
+        return check_bind(sqlite3_bind_int(stmt(), idx, value));
     }
 
     status statement::bind_double(int idx, double value) {
-        return check_bind(sqlite3_bind_double(stmt_, idx, value));
+        return check_bind(sqlite3_bind_double(stmt(), idx, value));
     }
 
     status statement::bind_int64(int idx, int64_t value) {
-        return check_bind(sqlite3_bind_int64(stmt_, idx, value));
+        return check_bind(sqlite3_bind_int64(stmt(), idx, value));
     }
 
     status statement::bind_uint64(int idx, uint64_t value) {
@@ -169,35 +229,35 @@ namespace sqnice {
     }
 
     status statement::bind(int idx, char const* value, copy_semantic fcopy) {
-        return check_bind(sqlite3_bind_text(stmt_, idx, value, int(std::strlen(value)),
+        return check_bind(sqlite3_bind_text(stmt(), idx, value, int(std::strlen(value)),
                                             as_dtor(fcopy)));
     }
 
     status statement::bind(int idx, blob value) {
-        return check_bind(sqlite3_bind_blob(stmt_, idx, value.data, int(value.size),
+        return check_bind(sqlite3_bind_blob(stmt(), idx, value.data, int(value.size),
                                             as_dtor(value.fcopy)));
     }
 
     status statement::bind(int idx, std::span<const std::byte> value, copy_semantic fcopy) {
-        return check_bind(sqlite3_bind_blob(stmt_, idx, value.data(), int(value.size_bytes()),
+        return check_bind(sqlite3_bind_blob(stmt(), idx, value.data(), int(value.size_bytes()),
                                             as_dtor(fcopy) ));
     }
 
     status statement::bind(int idx, std::string_view value, copy_semantic fcopy) {
-        return check_bind(sqlite3_bind_text(stmt_, idx, value.data(), int(value.size()),
+        return check_bind(sqlite3_bind_text(stmt(), idx, value.data(), int(value.size()),
                                             as_dtor(fcopy) ));
     }
 
     status statement::bind_pointer(int idx, void* ptr, const char* type, pointer_destructor dtor) {
-        return check_bind(sqlite3_bind_pointer(stmt_, idx, ptr, type, dtor));
+        return check_bind(sqlite3_bind_pointer(stmt(), idx, ptr, type, dtor));
     }
 
     status statement::bind(int idx, nullptr_t) {
-        return check_bind(sqlite3_bind_null(stmt_, idx));
+        return check_bind(sqlite3_bind_null(stmt(), idx));
     }
 
     statement::bindref statement::operator[] (char const *name) {
-        auto idx = sqlite3_bind_parameter_index(stmt_, name);
+        auto idx = sqlite3_bind_parameter_index(stmt(), name);
         if (idx < 1 && exceptions_) [[unlikely]]
             throw std::invalid_argument("unknown binding name");
         return bindref(*this, idx);
@@ -212,20 +272,27 @@ namespace sqnice {
 
 
     status command::try_execute() noexcept {
-        auto rc = step();
-        return rc == status::done ? status::ok : rc;
+        auto db = check_get_db();
+        sqlite3_stmt* stmtPointer = stmt();
+        auto rc = status{sqlite3_step(stmtPointer)};
+        if (rc == status::done) {
+            last_rowid_ = sqlite3_last_insert_rowid(db.get());
+            changes_ = sqlite3_changes(db.get());
+            rc = status::ok;
+        } else {
+            last_rowid_ = -1;
+            changes_ = 0;
+        }
+        reset();
+        return rc;
     }
 
-    int64_t command::last_insert_rowid() const noexcept   {return db_.last_insert_rowid();}
-
-    int command::changes() const noexcept                 {return db_.changes();}
-
-
+    
 #pragma mark - QUERY:
 
 
     int query::column_count() const noexcept {
-        return sqlite3_column_count(stmt_);
+        return sqlite3_column_count(any_stmt());
     }
 
     unsigned query::check_idx(unsigned idx) const {
@@ -235,11 +302,11 @@ namespace sqnice {
     }
 
     char const* query::column_name(unsigned idx) const {
-        return sqlite3_column_name(stmt_, check_idx(idx));
+        return sqlite3_column_name(any_stmt(), check_idx(idx));
     }
 
     char const* query::column_decltype(unsigned idx) const {
-        return sqlite3_column_decltype(stmt_, check_idx(idx));
+        return sqlite3_column_decltype(any_stmt(), check_idx(idx));
     }
 
 
@@ -312,23 +379,30 @@ namespace sqnice {
 
 
     query::iterator::iterator(query* query)
-    : query_(query)
-    , rc_ (query->step())
-    , cur_row_(query_->stmt_)
+    : impl_(query->give_impl(this))
+    , rc_ {sqlite3_step(impl_->stmt)}
+    , cur_row_(impl_->stmt)
     {
+        assert(impl_->owned_by(this));
         if (rc_ != status::row && rc_ != status::done)
-            query_->raise(rc_);
+            query->raise(rc_);
     }
 
     query::iterator::~iterator() noexcept {
-        if (rc_ != status::done && query_)
-            query_->reset();
+        if (impl_ && impl_->transfer_owner(this, nullptr))
+            sqlite3_reset(impl_->stmt);
     }
 
     query::iterator& query::iterator::operator++() {
-        rc_ = query_->step();
-        if (rc_ != status::row && rc_ != status::done)
-            query_->raise(rc_);
+        assert(impl_->owned_by(this));
+        rc_ = status{sqlite3_step(impl_->stmt)};
+        if (rc_ == status::done) {
+            sqlite3_reset(impl_->stmt);
+            impl_->transfer_owner(this, nullptr); // done with the statement now
+        } else if (rc_ != status::row && rc_ != status::ok) {
+            const char* msg = sqlite3_errmsg(sqlite3_db_handle(impl_->stmt));
+            checking::raise(rc_, msg);
+        }
         return *this;
     }
 

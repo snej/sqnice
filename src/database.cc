@@ -39,6 +39,7 @@ SQLITE_EXTENSION_INIT1
 #endif
 
 namespace sqnice {
+    using namespace std;
 
     static_assert(int(status::ok)               == SQLITE_OK);
     static_assert(int(status::error)            == SQLITE_ERROR);
@@ -92,8 +93,16 @@ namespace sqnice {
 
 
     checking::checking(database &db)
-    :checking(db, db.exceptions_)
+    :checking(db.db_, db.exceptions_)
     { }
+
+
+    std::shared_ptr<sqlite3> checking::check_get_db() const {
+        if (shared_ptr<sqlite3> db = weak_db_.lock()) [[likely]]
+            return db;
+        else
+            throw logic_error("database is no longer open");
+    }
 
 
     status checking::check(status rc) const {
@@ -107,7 +116,10 @@ namespace sqnice {
 
 
     void checking::raise(status rc) const {
-        raise(rc, db_.error_msg());
+        if (auto db = weak_db_.lock())
+            raise(rc, sqlite3_errmsg(db.get()));
+        else
+            raise(rc, "");
     }
 
     void checking::raise(status rc, const char* msg) {
@@ -144,41 +156,41 @@ namespace sqnice {
 #pragma mark - DATABASE:
 
 
+    database::database() noexcept
+    : checking(kExceptionsByDefault)
+    { }
+
     database::database(std::string_view dbname, open_flags flags, char const* vfs)
-    : checking(*this, kExceptionsByDefault)
+    : checking(kExceptionsByDefault)
     {
         connect(dbname, flags, vfs);
+        weak_db_ = db_;
     }
 
-    database::database() noexcept
-    : checking(*this, kExceptionsByDefault)
-    { }
-
     database::database(sqlite3* pdb) noexcept
-    : checking(*this, kExceptionsByDefault)
-    , db_(pdb)
-    , borrowing_(true)
-    { }
+    : checking(kExceptionsByDefault)
+    , db_(pdb, [](sqlite3*) { })    // do nothing when the last shared_ptr ref is gone
+    {
+        weak_db_ = db_;
+    }
 
-#if 0
     database::database(database&& db) noexcept
-    : checking(*this, db.exceptions_)
+    : checking(db.exceptions_)
     , db_(std::move(db.db_))
-    , borrowing_(std::move(db.borrowing_))
     , bh_(std::move(db.bh_))
     , ch_(std::move(db.ch_))
     , rh_(std::move(db.rh_))
     , uh_(std::move(db.uh_))
     , ah_(std::move(db.ah_))
     {
+        weak_db_ = db_;
         db.db_ = nullptr;
     }
 
     database& database::operator=(database&& db) noexcept {
-        exceptions_ = db.exceptions_;
+        static_cast<checking&>(*this) = static_cast<checking&&>(db);
         db_ = std::move(db.db_);
         db.db_ = nullptr;
-        borrowing_ = std::move(db.borrowing_);
         bh_ = std::move(db.bh_);
         ch_ = std::move(db.ch_);
         rh_ = std::move(db.rh_);
@@ -187,25 +199,8 @@ namespace sqnice {
 
         return *this;
     }
-#endif
-    
-    database::~database() noexcept {
-        if (db_ && !borrowing_) {
-            exceptions(false);  // don't throw from a destructor
-            if (auto rc = close(true); rc == status::busy) {
-                // Closing the database failed: there are still SQLite statements (queries) open,
-                // probably `command` or `query` objects that haven't been destructed yet.
-                // Unfortunately in a destructor, unlike `close()`, we mustn't throw an exception
-                // to make the operation fail. The best we can do is to call `sqlite3_close_v2`
-                // which will defer the close until the last open handle is gone.
-                fprintf(stderr, "**SQLITE WARNING**: A `sqnice::database` object at %p"
-                        "is being destructed while there are still open query iterators, blob"
-                        " streams or backups. This is bad! (For more information, read the docs for"
-                        "`sqnice::database::close`.)\n", (void*)db_);
-                (void)close(false);
-            }
-        }
-    }
+
+    database::~database() noexcept = default;
 
     database database::temporary(bool on_disk) {
         // "If the filename is an empty string, then a private, temporary on-disk database will
@@ -231,23 +226,38 @@ namespace sqnice {
         if (dbname.starts_with(":") && dbname != ":memory:" && !(flags & open_flags::uri))
             dbname = "./" + dbname; //FIXME: Is this OK on Windows?
 
-        auto rc = status{sqlite3_open_v2(dbname.c_str(), &db_,
+        sqlite3* db = nullptr;
+        auto rc = status{sqlite3_open_v2(dbname.c_str(), &db,
                                          int(flags) | SQLITE_OPEN_EXRESCODE,
                                          vfs)};
-        if (!ok(rc)) {
+        if (ok(rc)) {
+            // deleter function for the shared_ptr:
+            auto close_db = [](sqlite3* db) {
+                auto rc = status{sqlite3_close(db)};
+                if (rc == status::busy) {
+                    fprintf(stderr, "**SQLITE WARNING**: A `sqnice::database` object at %p"
+                            "is being destructed while there are still open query iterators, blob"
+                            " streams or backups. This is bad! (For more information, read the docs for"
+                            "`sqnice::database::close`.)\n", (void*)db);
+                    sqlite3_db_config(db, SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, 1, nullptr);
+                    (void)sqlite3_close_v2(db);
+                }
+            };
+            db_ = std::shared_ptr<sqlite3>(db, close_db);
+            
+        } else {
             if (exceptions_) {
                 std::string message;
-                if (db_) {
-                    message = sqlite3_errmsg(db_);
-                    (void)sqlite3_close_v2(db_);
+                if (db) {
+                    message = sqlite3_errmsg(db);
+                    (void)sqlite3_close_v2(db);
                 } else {
                     message = "can't open database";
                 }
                 raise(rc, message.c_str());
             } else {
-                (void)sqlite3_close_v2(db_);
+                (void)sqlite3_close_v2(db);
             }
-            db_ = nullptr;
         }
         return check(rc);
     }
@@ -256,30 +266,22 @@ namespace sqnice {
         commands_.reset();
         queries_.reset();
 
-        if (borrowing_ || !db_)
-            return status::ok;
-
-        status rc;
-        if (immediately) {
-            rc = status{sqlite3_close(db_)};
-        } else {
-            // sqlite3_close_v2() may not close the db immediately: if there are still active
-            // statements/backups/blob_handles, it waits for those to be freed. 
-            // There is a rare but extremely nasty situation where the caller might delete the
-            // database and open a new one at the same path _before_ SQLite actually closes it;
-            // in this case SQLite overwrites a mismatched WAL, causing data corruption.
-            // To prevent this, prevent SQLite from checkpointing on close.
-            sqlite3_db_config(db_, SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, 1, nullptr);
-            rc = status{sqlite3_close_v2(db_)};
-        }
-
-        if (ok(rc))
+        if (db_) {
+            if (db_.use_count() > 1)
+                return check(status::busy);
             db_ = nullptr;
-        return check(rc);
+        }
+        return status::ok;
+    }
+
+    sqlite3* database::check_handle() const {
+        if (!db_) [[unlikely]]
+            throw std::logic_error("database is not open");
+        return db_.get();
     }
 
     status database::execute(std::string_view sql) {
-        auto rc = status{sqlite3_exec(db_, std::string(sql).c_str(), nullptr, nullptr, nullptr)};
+        auto rc = status{sqlite3_exec(check_handle(), std::string(sql).c_str(), nullptr, nullptr, nullptr)};
         if (rc == status::error && exceptions_)
             throw std::invalid_argument(error_msg());
         return check(rc);
@@ -317,15 +319,17 @@ namespace sqnice {
     }
 
     status database::enable_foreign_keys(bool enable) {
-        return check(sqlite3_db_config(db_, SQLITE_DBCONFIG_ENABLE_FKEY, enable ? 1 : 0, nullptr));
+        return check(sqlite3_db_config(check_handle(), 
+                                       SQLITE_DBCONFIG_ENABLE_FKEY, enable ? 1 : 0, nullptr));
     }
 
     status database::enable_triggers(bool enable) {
-        return check(sqlite3_db_config(db_, SQLITE_DBCONFIG_ENABLE_TRIGGER, enable ? 1 : 0, nullptr));
+        return check(sqlite3_db_config(check_handle(),
+                                       SQLITE_DBCONFIG_ENABLE_TRIGGER, enable ? 1 : 0, nullptr));
     }
 
     status database::set_busy_timeout(int ms) {
-        return check(sqlite3_busy_timeout(db_, ms));
+        return check(sqlite3_busy_timeout(check_handle(), ms));
     }
 
     status database::setup() {
@@ -359,11 +363,11 @@ namespace sqnice {
 
 
     unsigned database::get_limit(limit lim) const noexcept {
-        return sqlite3_limit(db_, int(lim), -1);
+        return sqlite3_limit(check_handle(), int(lim), -1);
     }
 
     unsigned database::set_limit(limit lim, unsigned val) noexcept {
-        return sqlite3_limit(db_, int(lim), int(val));
+        return sqlite3_limit(check_handle(), int(lim), int(val));
     }
 
 
@@ -371,39 +375,39 @@ namespace sqnice {
 
 
     const char* database::filename() const noexcept {
-        return sqlite3_db_filename(db_, nullptr);
+        return sqlite3_db_filename(check_handle(), nullptr);
     }
 
     status database::error_code() const noexcept {
-        return status{sqlite3_errcode(db_)};
+        return status{sqlite3_errcode(check_handle())};
     }
 
     status database::extended_error_code() const noexcept {
-        return status{sqlite3_extended_errcode(db_)};
+        return status{sqlite3_extended_errcode(check_handle())};
     }
 
     char const* database::error_msg() const noexcept {
-        return sqlite3_errmsg(db_);
+        return sqlite3_errmsg(check_handle());
     }
 
     bool database::writeable() const noexcept {
-        return ! sqlite3_db_readonly(db_, "main");
+        return ! sqlite3_db_readonly(check_handle(), "main");
     }
 
     int64_t database::last_insert_rowid() const noexcept {
-        return sqlite3_last_insert_rowid(db_);
+        return sqlite3_last_insert_rowid(check_handle());
     }
 
     int database::changes() const noexcept {
-        return sqlite3_changes(db_);
+        return sqlite3_changes(check_handle());
     }
 
     int64_t database::total_changes() const noexcept {
-        return sqlite3_total_changes(db_);
+        return sqlite3_total_changes(check_handle());
     }
 
     bool database::in_transaction() const noexcept {
-        return !sqlite3_get_autocommit(db_);
+        return !sqlite3_get_autocommit(check_handle());
     }
 
 
@@ -481,9 +485,9 @@ namespace sqnice {
                             int step_page)
     {
         auto rc = status::ok;
-        sqlite3_backup* bkup = sqlite3_backup_init(destdb.db_,
+        sqlite3_backup* bkup = sqlite3_backup_init(destdb.check_handle(),
                                                    std::string(destdbname).c_str(),
-                                                   db_,
+                                                   check_handle(),
                                                    std::string(dbname).c_str());
         if (!bkup) {
             // "If an error occurs within sqlite3_backup_init, then ... an error code and error
@@ -606,35 +610,27 @@ namespace sqnice {
 
     void database::set_busy_handler(busy_handler h) noexcept {
         bh_ = h;
-        sqlite3_busy_handler(db_, bh_ ? busy_handler_impl : nullptr, &bh_);
+        sqlite3_busy_handler(check_handle(), bh_ ? busy_handler_impl : nullptr, &bh_);
     }
 
     void database::set_commit_handler(commit_handler h) noexcept {
         ch_ = h;
-        sqlite3_commit_hook(db_, ch_ ? commit_hook_impl : nullptr, &ch_);
+        sqlite3_commit_hook(check_handle(), ch_ ? commit_hook_impl : nullptr, &ch_);
     }
 
     void database::set_rollback_handler(rollback_handler h) noexcept {
         rh_ = h;
-        sqlite3_rollback_hook(db_, rh_ ? rollback_hook_impl : nullptr, &rh_);
+        sqlite3_rollback_hook(check_handle(), rh_ ? rollback_hook_impl : nullptr, &rh_);
     }
 
     void database::set_update_handler(update_handler h) noexcept {
         uh_ = h;
-        sqlite3_update_hook(db_, uh_ ? update_hook_impl : nullptr, &uh_);
+        sqlite3_update_hook(check_handle(), uh_ ? update_hook_impl : nullptr, &uh_);
     }
 
     void database::set_authorize_handler(authorize_handler h) noexcept {
         ah_ = h;
-        sqlite3_set_authorizer(db_, ah_ ? authorizer_impl : nullptr, &ah_);
-    }
-
-
-    status database::create_function(const char *name, int nArg, void*pApp,
-                                     callFn call, callFn step, finishFn finish, destroyFn destroy)
-    {
-        return check( sqlite3_create_function_v2(db_, name, nArg, SQLITE_UTF8, pApp,
-                                                 call, step , finish, destroy) );
+        sqlite3_set_authorizer(check_handle(), ah_ ? authorizer_impl : nullptr, &ah_);
     }
 
 }

@@ -42,7 +42,8 @@ namespace sqnice {
                              bool writeable)
     : checking(db)
     {
-        status_ = status{sqlite3_blob_open(db.db_, database, table, column, rowid, writeable, &blob_)};
+        status_ = status{sqlite3_blob_open(db.check_handle(), database, table, column, 
+                                           rowid, writeable, &blob_)};
         check(status_);
         if (status_ == status::ok)
             size_ = sqlite3_blob_bytes(blob_);
