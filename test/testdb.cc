@@ -48,10 +48,12 @@ TEST_CASE_METHOD(sqnice_test, "SQNice insert_execute", "[sqnice]") {
 }
 
 TEST_CASE_METHOD(sqnice_test, "SQNice invalid path", "[.sqnice]") {
-    auto open_bad = []{
-        sqnice::database bad_db("/test/invalid/path");
-    };
-    REQUIRE_THROWS(open_bad());
+    sqnice::database bad_db;
+    bad_db.exceptions(false);
+    auto rc = bad_db.connect("/test/invalid/path");
+    CHECK(rc == sqnice::status::cantopen);
+    CHECK(bad_db.error_code() == sqnice::status::cantopen);
+    CHECK(bad_db.error_msg() != nullptr);
 }
 
 TEST_CASE_METHOD(sqnice_test, "SQNice close", "[sqnice]") {

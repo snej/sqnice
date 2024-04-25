@@ -246,22 +246,17 @@ namespace sqnice {
                 }
             };
             db_ = std::shared_ptr<sqlite3>(db, close_db);
+            posthumous_error_ = nullptr;
 
         } else {
-            if (exceptions_) {
-                std::string message;
-                if (db) {
-                    message = sqlite3_errmsg(db);
+            std::string message = db ? sqlite3_errmsg(db) : "can't open database";
             (void)sqlite3_close_v2(db);
-                } else {
-                    message = "can't open database";
-                }
+            if (exceptions())
                 raise(rc, message.c_str());
-            } else {
-                (void)sqlite3_close_v2(db);
-            }
+            else
+                posthumous_error_ = make_unique<database_error>(message.c_str(), rc);
         }
-        return check(rc);
+        return rc;
     }
 
     status database::close(bool immediately) {
@@ -380,16 +375,22 @@ namespace sqnice {
         return sqlite3_db_filename(check_handle(), nullptr);
     }
 
-    status database::error_code() const noexcept {
-        return status{sqlite3_errcode(check_handle())};
-    }
-
     status database::extended_error_code() const noexcept {
-        return status{sqlite3_extended_errcode(check_handle())};
+        if (db_)
+            return status{sqlite3_extended_errcode(db_.get())};
+        else if (posthumous_error_)
+            return posthumous_error_->error_code;
+        else
+            return status::cantopen;
     }
 
     char const* database::error_msg() const noexcept {
-        return sqlite3_errmsg(check_handle());
+        if (db_)
+            return sqlite3_errmsg(db_.get());
+        else if (posthumous_error_)
+            return posthumous_error_->what();
+        else
+            return nullptr;
     }
 
     bool database::writeable() const noexcept {

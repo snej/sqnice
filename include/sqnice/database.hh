@@ -209,7 +209,7 @@ namespace sqnice {
 
 #pragma mark - STATUS:
 
-        status error_code() const noexcept;
+        status error_code() const noexcept            {return basic_status(extended_error_code());}
         status extended_error_code() const noexcept;
         char const* _Nullable error_msg() const noexcept;
 
@@ -402,6 +402,7 @@ namespace sqnice {
         db_handle           db_;
         int                 txn_depth_ = 0;
         bool                txn_immediate_ = false;
+        std::unique_ptr<database_error> posthumous_error_;
         std::unique_ptr<statement_cache<sqnice::command>> commands_;
         std::unique_ptr<statement_cache<sqnice::query>> queries_;
         log_handler         lh_;
