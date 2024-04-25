@@ -35,6 +35,7 @@ SQLITE_EXTENSION_INIT1
 #endif
 
 namespace sqnice {
+    using namespace std;
 
     blob_stream::blob_stream(database& db,
                              const char *database,

@@ -49,7 +49,7 @@ namespace sqnice {
     : checking(kExceptionsByDefault)
     { }
 
-    database::database(std::string_view dbname, open_flags flags, char const* vfs)
+    database::database(string_view dbname, open_flags flags, char const* vfs)
     : checking(kExceptionsByDefault)
     {
         connect(dbname, flags, vfs);
@@ -94,7 +94,7 @@ namespace sqnice {
     database database::temporary(bool on_disk) {
         // "If the filename is an empty string, then a private, temporary on-disk database will
         // be created [and] automatically deleted as soon as the database connection is closed."
-        std::string_view name;
+        string_view name;
         open_flags flags = open_flags::readwrite;
         if (!on_disk) {
             name = "temporary";
@@ -103,13 +103,13 @@ namespace sqnice {
         return database(name, flags);
     }
 
-    status database::connect(std::string_view dbname_, open_flags flags, char const* vfs) {
+    status database::connect(string_view dbname_, open_flags flags, char const* vfs) {
         close();
 
         if (!!(flags & open_flags::memory) && !(flags & (open_flags::readwrite | open_flags::readonly)))
             flags |= open_flags::readwrite;
 
-        std::string dbname(dbname_);
+        string dbname(dbname_);
         // "It is recommended that when a database filename actually does begin with a ":" character
         // you should prefix the filename with a pathname such as "./" to avoid ambiguity."
         if (dbname.starts_with(":") && dbname != ":memory:" && !(flags & open_flags::uri))
@@ -132,11 +132,11 @@ namespace sqnice {
                     (void)sqlite3_close_v2(db);
                 }
             };
-            db_ = std::shared_ptr<sqlite3>(db, close_db);
+            db_ = shared_ptr<sqlite3>(db, close_db);
             posthumous_error_ = nullptr;
 
         } else {
-            std::string message = db ? sqlite3_errmsg(db) : "can't open database";
+            string message = db ? sqlite3_errmsg(db) : "can't open database";
             (void)sqlite3_close_v2(db);
             if (exceptions())
                 raise(rc, message.c_str());
@@ -160,44 +160,44 @@ namespace sqnice {
 
     sqlite3* database::check_handle() const {
         if (!db_) [[unlikely]]
-            throw std::logic_error("database is not open");
+            throw logic_error("database is not open");
         return db_.get();
     }
 
-    status database::execute(std::string_view sql) {
-        auto rc = status{sqlite3_exec(check_handle(), std::string(sql).c_str(), nullptr, nullptr, nullptr)};
+    status database::execute(string_view sql) {
+        auto rc = status{sqlite3_exec(check_handle(), string(sql).c_str(), nullptr, nullptr, nullptr)};
         if (rc == status::error && exceptions_)
-            throw std::invalid_argument(error_msg());
+            throw invalid_argument(error_msg());
         return check(rc);
     }
 
     status database::executef(char const* sql, ...) {
         va_list ap;
         va_start(ap, sql);
-        std::shared_ptr<char> msql(sqlite3_vmprintf(sql, ap), sqlite3_free);
+        shared_ptr<char> msql(sqlite3_vmprintf(sql, ap), sqlite3_free);
         va_end(ap);
 
         return execute(msql.get());
     }
 
 
-    command database::command(std::string_view sql) {
+    command database::command(string_view sql) {
         if (!commands_)
-            commands_ = std::make_unique<command_cache>(*this);
-        return commands_->compile(std::string(sql));
+            commands_ = make_unique<command_cache>(*this);
+        return commands_->compile(string(sql));
     }
 
-    query database::query(std::string_view sql) {
+    query database::query(string_view sql) {
         if (!queries_)
-            queries_ = std::make_unique<query_cache>(*this);
-        return queries_->compile(std::string(sql));
+            queries_ = make_unique<query_cache>(*this);
+        return queries_->compile(string(sql));
     }
 
 
 #pragma mark - DATABASE CONFIGURATION:
 
 
-    std::tuple<int,int,int> database::sqlite_version() noexcept {
+    tuple<int,int,int> database::sqlite_version() noexcept {
         auto v = sqlite3_libversion_number();
         return {v / 1'000'000, v / 1'000, v % 1'000};
     }
@@ -230,19 +230,19 @@ namespace sqnice {
 
 
     int64_t database::pragma(const char* pragma) {
-        return sqnice::query(*this, std::string("PRAGMA \"") + pragma + "\"").single_value_or<int>(0);
+        return sqnice::query(*this, string("PRAGMA \"") + pragma + "\"").single_value_or<int>(0);
     }
 
-    std::string database:: string_pragma(const char* pragma) {
-        return sqnice::query(*this, std::string("PRAGMA \"") + pragma + "\"").single_value_or<std::string>("");
+    string database:: string_pragma(const char* pragma) {
+        return sqnice::query(*this, string("PRAGMA \"") + pragma + "\"").single_value_or<string>("");
     }
 
     status database::pragma(const char* pragma, int64_t value) {
         return executef("PRAGMA %s(%d)", pragma, value);
     }
 
-    status database::pragma(const char* pragma, std::string_view value) {
-        return executef("PRAGMA %s(%q)", pragma, std::string(value).c_str());
+    status database::pragma(const char* pragma, string_view value) {
+        return executef("PRAGMA %s(%q)", pragma, string(value).c_str());
     }
 
 
@@ -308,7 +308,7 @@ namespace sqnice {
         if (txn_depth_ == 0) {
             if (immediate) {
                 if (in_transaction())
-                    throw std::logic_error("unexpectedly already in a transaction");
+                    throw logic_error("unexpectedly already in a transaction");
                 // Create an immediate txn, otherwise SAVEPOINT defaults to DEFERRED
                 if (auto rc = command("BEGIN IMMEDIATE").execute(); !ok(rc))
                     return rc;
@@ -331,7 +331,7 @@ namespace sqnice {
 
     status database::endTransaction(bool commit) {
         if (txn_depth_ <= 0) [[unlikely]]
-            throw std::logic_error("transaction underflow");
+            throw logic_error("transaction underflow");
         char sql[50];
         if (!commit) {
             /// "Instead of cancelling the transaction, the ROLLBACK TO command restarts the
@@ -350,7 +350,7 @@ namespace sqnice {
         if (txn_depth_ == 0) {
             if (txn_immediate_) {
                 if (!in_transaction())
-                    throw std::logic_error("unexpectedly not in a transaction");
+                    throw logic_error("unexpectedly not in a transaction");
                 if (auto rc = command(commit ? "COMMIT" : "ROLLBACK").execute(); !ok(rc)) {
                     ++txn_depth_;
                     return rc;
@@ -368,17 +368,17 @@ namespace sqnice {
         return backup("main", destdb, "main", h);
     }
 
-    status database::backup(std::string_view dbname,
+    status database::backup(string_view dbname,
                             database& destdb, 
-                            std::string_view destdbname,
+                            string_view destdbname,
                             backup_handler handler,
                             int step_page)
     {
         auto rc = status::ok;
         sqlite3_backup* bkup = sqlite3_backup_init(destdb.check_handle(),
-                                                   std::string(destdbname).c_str(),
+                                                   string(destdbname).c_str(),
                                                    check_handle(),
-                                                   std::string(dbname).c_str());
+                                                   string(dbname).c_str());
         if (!bkup) {
             // "If an error occurs within sqlite3_backup_init, then ... an error code and error
             // message are stored in the destination database connection"
@@ -425,10 +425,10 @@ namespace sqnice {
     static constexpr int64_t kVacuumSizeThreshold = 10'000'000;
 
 
-    std::optional<int64_t> database::incremental_vacuum(bool always, int64_t nPages) {
+    optional<int64_t> database::incremental_vacuum(bool always, int64_t nPages) {
         // <https://blogs.gnome.org/jnelson/2015/01/06/sqlite-vacuum-and-auto_vacuum/>
         if (!writeable())
-            return std::nullopt;
+            return nullopt;
         int64_t pageCount = pragma("page_count");
         bool do_it = always;
         if (!always) {
@@ -438,7 +438,7 @@ namespace sqnice {
                     || freePages * pragma("page_size") >= kVacuumSizeThreshold;
         }
         if (!do_it)
-            return std::nullopt;
+            return nullopt;
 
         pragma("incremental_vacuum", nPages);
         if (always) {

@@ -57,12 +57,12 @@ namespace sqnice {
         sqlite3_result_double(ctx_, value);
     }
 
-    void function_result::set(std::string_view value, copy_semantic fcopy) noexcept {
+    void function_result::set(string_view value, copy_semantic fcopy) noexcept {
         sqlite3_result_text64(ctx_, value.data(), value.size(), as_dtor(fcopy), SQLITE_UTF8);
     }
 
     void function_result::set(char const* value, copy_semantic fcopy) noexcept {
-        set(std::string_view(value), fcopy);
+        set(string_view(value), fcopy);
     }
 
     void function_result::operator= (blob const& value) noexcept {
@@ -104,7 +104,7 @@ namespace sqnice {
     
     arg_value function_args::operator[] (size_t arg) const {
         if (arg >= argc_)
-            throw std::invalid_argument("context arg index out of range");
+            throw invalid_argument("context arg index out of range");
         return arg_value(argv_[arg]);
     }
 
@@ -137,7 +137,7 @@ namespace sqnice {
         return reinterpret_cast<char const*>(sqlite3_value_text(value_));
     }
 
-    template<> std::string_view arg_value::get() const noexcept {
+    template<> string_view arg_value::get() const noexcept {
         char const* cstr = get<const char*>();
         if (!cstr)
             return {};

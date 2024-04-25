@@ -36,6 +36,7 @@ SQLITE_EXTENSION_INIT1
 #endif
 
 namespace sqnice {
+    using namespace std;
 
     transaction::transaction(database& db, bool auto_commit, bool immediate)
     : db_(db)
@@ -58,7 +59,7 @@ namespace sqnice {
 
     transaction::~transaction() noexcept {
         if (active_) {
-            if (autocommit_ && !std::current_exception()) {
+            if (autocommit_ && !current_exception()) {
                 // It is legal (though discouraged) to throw an exception from a destructor,
                 // as long as the destructor was not called as part of unwinding the stack
                 // while an exception is thrown.

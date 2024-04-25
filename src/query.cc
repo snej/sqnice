@@ -61,13 +61,13 @@ namespace sqnice {
     }
 
 
-    statement::statement(checking& ck, std::shared_ptr<impl> impl) noexcept
+    statement::statement(checking& ck, shared_ptr<impl> impl) noexcept
     :checking(ck),
     impl_(std::move(impl))
     { }
 
 
-    statement::statement(checking& ck, std::string_view stmt, persistence persistence)
+    statement::statement(checking& ck, string_view stmt, persistence persistence)
     :statement(ck)
     {
         exceptions_ = true;
@@ -115,7 +115,7 @@ namespace sqnice {
         (void) finish();
     }
 
-    status statement::prepare(std::string_view sql, persistence persistence) {
+    status statement::prepare(string_view sql, persistence persistence) {
         sqlite3_stmt* stmt = nullptr;
         const char* tail = nullptr;
         unsigned flags = (persistence ? SQLITE_PREPARE_PERSISTENT : 0);
@@ -126,13 +126,13 @@ namespace sqnice {
             // Multiple statements are not supported.
             sqlite3_finalize(stmt);
             if (exceptions_)
-                throw std::invalid_argument("multiple SQL statements are not allowed");
+                throw invalid_argument("multiple SQL statements are not allowed");
             rc = status::error;
         } else if (rc == status::error && exceptions_) {
             // Throw a better exception:
-            std::string message(sqlite3_errmsg(db.get()));
-            message += ", in SQL statement \"" + std::string(sql) + "\"";
-            throw std::invalid_argument(message);
+            string message(sqlite3_errmsg(db.get()));
+            message += ", in SQL statement \"" + string(sql) + "\"";
+            throw invalid_argument(message);
         } else if (ok(rc)) {
             finish();
             impl_ = shared_ptr<impl>(new impl(stmt));
@@ -148,7 +148,7 @@ namespace sqnice {
         if (int idx = sqlite3_bind_parameter_index(any_stmt(), name); idx >= 1)
             return idx;
         else [[unlikely]]
-            throw std::invalid_argument("unknown binding name");
+            throw invalid_argument("unknown binding name");
     }
 
     void statement::finish() noexcept {
@@ -188,14 +188,14 @@ namespace sqnice {
             throw logic_error("command or query is in use by an iterator");
     }
 
-    std::string_view statement::sql() const {
+    string_view statement::sql() const {
         string_view result;
         if (const char* sql = sqlite3_sql(any_stmt()))
             result = sql;
         return result;
     }
 
-    std::string statement::expanded_sql() const {
+    string statement::expanded_sql() const {
         string result;
         if (char* sql = sqlite3_expanded_sql(any_stmt())) {
             result = sql;
@@ -222,7 +222,7 @@ namespace sqnice {
 
     status statement::check_bind(int rc) {
         if (exceptions_ && rc == SQLITE_RANGE) [[unlikely]]
-            throw std::invalid_argument("bind index out of range");
+            throw invalid_argument("bind index out of range");
         else
             return check(rc);
     }
@@ -241,7 +241,7 @@ namespace sqnice {
 
     status statement::bind_uint64(int idx, uint64_t value) {
         if (value > INT64_MAX) [[unlikely]]
-            throw std::domain_error("uint64_t value too large for SQLite");
+            throw domain_error("uint64_t value too large for SQLite");
         return bind_int64(idx, int64_t(value));
     }
 
@@ -249,7 +249,7 @@ namespace sqnice {
         return bind(idx, string_view(value), fcopy);
     }
 
-    status statement::bind(int idx, std::string_view value, copy_semantic fcopy) {
+    status statement::bind(int idx, string_view value, copy_semantic fcopy) {
         return check_bind(sqlite3_bind_text64(stmt(), idx, value.data(), value.size(),
                                               as_dtor(fcopy), SQLITE_UTF8));
     }
@@ -262,7 +262,7 @@ namespace sqnice {
             return check_bind(sqlite3_bind_zeroblob64(stmt(), idx, value.size));
     }
 
-    status statement::bind(int idx, std::span<const std::byte> value, copy_semantic fcopy) {
+    status statement::bind(int idx, span<const byte> value, copy_semantic fcopy) {
         return check_bind(sqlite3_bind_blob64(stmt(), idx, value.data(), value.size_bytes(),
                                               as_dtor(fcopy) ));
     }
@@ -282,7 +282,7 @@ namespace sqnice {
     statement::bindref statement::operator[] (char const *name) {
         auto idx = sqlite3_bind_parameter_index(stmt(), name);
         if (idx < 1 && exceptions_) [[unlikely]]
-            throw std::invalid_argument("unknown binding name");
+            throw invalid_argument("unknown binding name");
         return bindref(*this, idx);
     }
 
@@ -320,7 +320,7 @@ namespace sqnice {
 
     unsigned query::check_idx(unsigned idx) const {
         if (idx >= column_count()) [[unlikely]]
-            throw std::invalid_argument("invalid column index");
+            throw invalid_argument("invalid column index");
         return idx;
     }
 
@@ -342,7 +342,7 @@ namespace sqnice {
 
     unsigned query::row::check_idx(unsigned idx) const {
         if (idx >= column_count()) [[unlikely]]
-            throw std::invalid_argument("invalid column index");
+            throw invalid_argument("invalid column index");
         return idx;
     }
 
@@ -378,7 +378,7 @@ namespace sqnice {
         return reinterpret_cast<char const*>(sqlite3_column_text(stmt_, idx_));
     }
 
-    template<> std::string_view column_value::get() const noexcept {
+    template<> string_view column_value::get() const noexcept {
         char const* cstr = get<const char*>();
         if (!cstr)
             return {};

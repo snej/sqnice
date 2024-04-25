@@ -88,7 +88,7 @@ namespace sqnice {
 
 
     database_error::database_error(char const* msg, status rc)
-    : std::runtime_error(msg)
+    : runtime_error(msg)
     , error_code(rc) {
     }
 
@@ -98,7 +98,7 @@ namespace sqnice {
     { }
 
 
-    std::shared_ptr<sqlite3> checking::check_get_db() const {
+    shared_ptr<sqlite3> checking::check_get_db() const {
         if (shared_ptr<sqlite3> db = weak_db_.lock()) [[likely]]
             return db;
         else
@@ -126,18 +126,18 @@ namespace sqnice {
     void checking::raise(status rc, const char* msg) {
         switch (int(rc)) {
             case SQLITE_INTERNAL:
-                throw std::logic_error(msg);
+                throw logic_error(msg);
             case SQLITE_NOMEM:
-                throw std::bad_alloc();
+                throw bad_alloc();
             case SQLITE_RANGE:
             case SQLITE_MISUSE:
-                throw std::invalid_argument(msg);
+                throw invalid_argument(msg);
             case SQLITE_OK:
             case SQLITE_NOTICE:
             case SQLITE_WARNING:
             case SQLITE_ROW:
             case SQLITE_DONE:
-                throw std::logic_error("invalid call to throw_, err=" + std::to_string(int(rc)));
+                throw logic_error("invalid call to throw_, err=" + to_string(int(rc)));
             default:
                 throw database_error(msg, rc);
         }
