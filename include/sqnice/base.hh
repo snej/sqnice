@@ -85,7 +85,7 @@ namespace sqnice {
     /** Exception class thrown by this API. */
     class database_error : public std::runtime_error {
     public:
-        explicit database_error(char const* msg, status rc);
+        explicit database_error(char const* msg, status rc = status::error);
         explicit database_error(char const* msg, int rc)    :database_error(msg,status{rc}) { }
 
         status const error_code;

@@ -45,40 +45,9 @@ struct sqlite3_value;
 namespace sqnice {
     class arg_value;
     class context;
-    class context_result;
+    class function_result;
 
-    namespace {
-        template<size_t N>
-        struct Apply {
-            template<typename F, typename T, typename... A>
-            static inline auto apply(F&& f, T&& t, A&&... a)
-            -> decltype(Apply<N-1>::apply(std::forward<F>(f),
-                                          std::forward<T>(t),
-                                          std::get<N-1>(std::forward<T>(t)),
-                                          std::forward<A>(a)...)) {
-                return Apply<N-1>::apply(std::forward<F>(f),
-                                         std::forward<T>(t),
-                                         std::get<N-1>(std::forward<T>(t)),
-                                         std::forward<A>(a)...);
-            }
-        };
-
-        template<>
-        struct Apply<0> {
-            template<typename F, typename T, typename... A>
-            static inline auto apply(F&& f, T&&, A&&... a)
-            -> decltype(std::forward<F>(f)(std::forward<A>(a)...)) {
-                return std::forward<F>(f)(std::forward<A>(a)...);
-            }
-        };
-
-        template<typename F, typename T>
-        inline auto apply_f(F&& f, T&& t)
-        -> decltype(Apply<std::tuple_size<typename std::decay<T>::type>::value>::apply(std::forward<F>(f), std::forward<T>(t))) {
-            return Apply<std::tuple_size<typename std::decay<T>::type>::value>::apply(
-                                                                                      std::forward<F>(f), std::forward<T>(t));
-        }
-    }
+    using argv_t = sqlite3_value* _Nullable * _Nullable;
 
 
     /** The concept `resultable` identifies custom types that can be assigned as a function result.
@@ -90,8 +59,23 @@ namespace sqnice {
     };
 
 
-    /** Represents the result of a function. The type of `context::result`. */
-    class context_result : noncopyable {
+    /** The array of arguments passed to a function call. */
+    class function_args : noncopyable {
+    public:
+        arg_value operator[] (size_t i) const;
+        size_t size() const                         {return argc_;}
+
+    private:
+        friend class context;
+        function_args(int argc, argv_t argv)                 :argc_(argc), argv_(argv) { }
+        int const     argc_;
+        argv_t const  argv_;
+    };
+
+
+    /** Represents the result of a function; its only purpose is to be assigned to.
+        The type of `context::result`. */
+    class function_result : noncopyable {
     public:
         void operator= (std::signed_integral auto v) {
             static_assert(sizeof(v) <= 8);
@@ -131,14 +115,18 @@ namespace sqnice {
         }
 
         using pointer_destructor = void(*)(void*);
+
+        /// Sets the result to an opaque pointer value.
+        /// @note see <https://sqlite.org/bindptr.html>
         void set_pointer(void* pointer, const char* type, pointer_destructor);
 
-        void set_error(status, std::string_view msg);
-        void set_error(std::string_view msg);
+        /// Sets the result to an error.
+        void operator= (database_error const& x)        {set_error(x.what(), x.error_code);}
+        void set_error(std::string_view msg, status = status::error);
 
     private:
         friend class context;
-        explicit context_result(sqlite3_context* ctx)   :ctx_(ctx) { }
+        explicit function_result(sqlite3_context* ctx)   :ctx_(ctx) { }
         void set_int(int value);
         void set_int64(int64_t value);
         void set_uint64(uint64_t value);
@@ -151,31 +139,19 @@ namespace sqnice {
     /** The context of a SQLite function call. Holds the arguments and result. */
     class context : noncopyable {
     public:
-        using argv_t = sqlite3_value* _Nullable * _Nullable;
         explicit context(sqlite3_context* ctx, int nargs = 0, argv_t values = nullptr);
 
-        class context_args {
-        public:
-            arg_value operator[] (unsigned arg) const;
-            size_t size() const                         {return argc_;}
-        private:
-            friend class context;
-            context_args(int argc, argv_t argv)         :argc_(argc), argv_(argv) { }
-            int     argc_;
-            argv_t  argv_;
-        };
-
         size_t const    argc;       ///< The number of arguments
-        context_args    argv;       ///< The "array" of arguments
-        context_result  result;     ///< Assign the result to this
+        function_args   argv;       ///< The "array" of arguments
+        function_result  result;     ///< Assign the result to this
 
+        /// Gets the `idx`th arg as type `T`. Equivalent to `T t = argv[idx];`
         template <class T> T get(int idx) const;
 
-        void result_error(std::string_view msg)         {result.set_error(msg);}
-
     private:
-        friend class functions;
+        friend class database;
 
+        void* _Nullable user_data();
         void* _Nullable aggregate_data(int size);
 
         template <class T>
@@ -193,13 +169,12 @@ namespace sqnice {
             return to_tuple_impl(0, *this, std::tuple<Ts...>());
         }
 
-        void* user_data();
-
         template<class H, class... Ts>
         static inline std::tuple<H, Ts...> to_tuple_impl(int index, const context& c, std::tuple<H, Ts...>&&) {
             auto h = std::make_tuple(c.context::get<H>(index));
             return std::tuple_cat(h, to_tuple_impl(++index, c, std::tuple<Ts...>()));
         }
+
         static inline std::tuple<> to_tuple_impl(int /*index*/, const context& /*c*/, std::tuple<>&&) {
             return std::tuple<>();
         }
@@ -209,24 +184,25 @@ namespace sqnice {
     };
 
 
-    /** Represents a single function argument; returned by `context[]`. */
+    /** Represents a single function argument; the type of `context.argv[i]`. */
     class arg_value : sqnice::noncopyable {
     public:
         explicit arg_value(sqlite3_value* v) noexcept   :value_(v) { }
+        sqlite3_value* value() const noexcept           {return value_;}
 
-        /// Gets the value as type `T`.
-        template <typename T> T get() const noexcept;
-
-        /// Implicit conversion to type `T`, for assignment or passing as a parameter.
-        template <typename T> operator T() const noexcept  {return get<T>();}
-
-        /// The data type of the column value.
+        /// The data type of the value.
         data_type type() const noexcept;
         bool not_null() const noexcept                  {return type() != data_type::null;}
         bool is_blob() const noexcept                   {return type() == data_type::blob;}
 
         /// The length in bytes of a text or blob value.
         size_t size_bytes() const noexcept;
+
+        /// Gets the value as type `T`.
+        template <typename T> T get() const noexcept;
+
+        /// Implicit conversion to type `T`, for assignment or passing as a parameter.
+        template <typename T> operator T() const noexcept  {return get<T>();}
 
         // The following are just the specializations of get<T>() ...
 
@@ -260,8 +236,6 @@ namespace sqnice {
 
         template <columnable T> T get() const noexcept  {return column_helper<T>::get(*this);}
 
-        sqlite3_value* value() const noexcept           {return value_;}
-
     private:
         arg_value(arg_value&&) = delete;
         arg_value& operator=(arg_value&&) = delete;
@@ -277,83 +251,64 @@ namespace sqnice {
     template <class T> T context::get(int idx) const    {return argv[idx];}
 
 
-    /** Manages user-defined functions for a database. */
-    class functions : public checking, noncopyable {
-    public:
-        using function_handler = std::function<void (context&)>;
-        using pfunction_base = std::shared_ptr<void>;
+    // implementations of `database` function-related template methods.
 
-        explicit functions(database& db) : checking(db) { }
-
-        status create(char const* name, function_handler h, int nargs);
-
-        template <class F>
-        status create(char const* name, std::function<F> h) {
-            auto db = check_get_db();
-            auto fh = new std::function<F>(std::move(h));
-            auto destroy = [](void* pApp) {delete static_cast<std::function<F>*>(pApp);};
-            return create_function_impl<F>()(this, name, fh, destroy);
-        }
-
-        status create_aggregate(char const* name, function_handler s, function_handler f, int nargs);
-
-        template <class T, class... Ps>
-        status create_aggregate(char const* name) {
-            auto db = check_get_db();
-            return register_function(db, name, sizeof...(Ps), 0, nullptr,
-                                     stepx_impl<T, Ps...>, finishN_impl<T>, destroy_impl<T>);
-        }
-
-    private:
-
-        template<class R, class... Ps>
-        struct create_function_impl;
-
-        template<class R, class... Ps>
-        struct create_function_impl<R (Ps...)> {
-            status operator()(functions* fns, char const* name, void* fh,
-                              void (*destroy)(void*)) {
-                return fns->register_function(fns->check_get_db(), name, sizeof...(Ps), fh, functionx_impl<R, Ps...>, nullptr, nullptr, destroy);
+    namespace {
+        template<size_t N>
+        struct Apply {
+            template<typename F, typename T, typename... A>
+            static inline auto apply(F&& f, T&& t, A&&... a)
+            -> decltype(Apply<N-1>::apply(std::forward<F>(f),
+                                          std::forward<T>(t),
+                                          std::get<N-1>(std::forward<T>(t)),
+                                          std::forward<A>(a)...)) {
+                return Apply<N-1>::apply(std::forward<F>(f),
+                                         std::forward<T>(t),
+                                         std::get<N-1>(std::forward<T>(t)),
+                                         std::forward<A>(a)...);
             }
         };
 
-        template <class R, class... Ps>
-        static void functionx_impl(sqlite3_context* ctx, int nargs, context::argv_t values) {
-            context c(ctx, nargs, values);
-            auto f = static_cast<std::function<R (Ps...)>*>(c.user_data());
-            c.result = apply_f(*f, c.to_tuple<Ps...>());
-        }
+        template<>
+        struct Apply<0> {
+            template<typename F, typename T, typename... A>
+            static inline auto apply(F&& f, T&&, A&&... a)
+            -> decltype(std::forward<F>(f)(std::forward<A>(a)...)) {
+                return std::forward<F>(f)(std::forward<A>(a)...);
+            }
+        };
 
-        template <class T, class... Ps>
-        static void stepx_impl(sqlite3_context* ctx, int nargs, context::argv_t values) {
-            context c(ctx, nargs, values);
-            T* t = c.aggregate_state<T>();
-            apply_f([](T* tt, Ps... ps){tt->step(ps...);},
-                    std::tuple_cat(std::make_tuple(t), c.to_tuple<Ps...>()));
+        template<typename F, typename T>
+        inline auto apply_f(F&& f, T&& t)
+        -> decltype(Apply<std::tuple_size<typename std::decay<T>::type>::value>::apply(std::forward<F>(f), std::forward<T>(t))) {
+            return Apply<std::tuple_size<typename std::decay<T>::type>::value>::apply(
+                                                                                      std::forward<F>(f), std::forward<T>(t));
         }
+    }
 
-        template <class T>
-        static void finishN_impl(sqlite3_context* ctx) {
-            context c(ctx);
-            T* t = c.aggregate_state<T>();
-            c.result = t->finish();
-            t->~T();
-        }
 
-        template <class T>
-        static void destroy_impl(void* pApp) {
-        }
+    template <class R, class... Ps>
+    void database::functionx_impl(sqlite3_context* ctx, int nargs, argv_t values) {
+        context c(ctx, nargs, values);
+        auto f = static_cast<std::function<R (Ps...)>*>(c.user_data());
+        c.result = apply_f(*f, c.to_tuple<Ps...>());
+    }
 
-        using callFn = void (*)(sqlite3_context*, int, context::argv_t);
-        using finishFn = void (*)(sqlite3_context*);
-        using destroyFn = void (*)(void*);
-        status register_function(std::shared_ptr<sqlite3> const&,
-                                 const char *name, int nArg, void* _Nullable pApp,
-                                 callFn _Nullable call,
-                                 callFn _Nullable step = nullptr,
-                                 finishFn _Nullable finish = nullptr,
-                                 destroyFn destroy = nullptr);
-    };
+    template <class T, class... Ps>
+    void database::stepx_impl(sqlite3_context* ctx, int nargs, argv_t values) {
+        context c(ctx, nargs, values);
+        T* t = c.aggregate_state<T>();
+        apply_f([](T* tt, Ps... ps){tt->step(ps...);},
+                std::tuple_cat(std::make_tuple(t), c.to_tuple<Ps...>()));
+    }
+
+    template <class T>
+    void database::finishN_impl(sqlite3_context* ctx) {
+        context c(ctx);
+        T* t = c.aggregate_state<T>();
+        c.result = t->finish();
+        t->~T();
+    }
 
 } // namespace sqnice
 

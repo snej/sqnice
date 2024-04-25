@@ -39,10 +39,11 @@ struct sqlite3_value;
 
 namespace sqnice {
 
-    class aggregates;
     class command;
+    class context;
     class database;
-    class functions;
+    class function_args;
+    class function_result;
     class query;
     template <class STMT> class statement_cache;
 
@@ -80,6 +81,17 @@ namespace sqnice {
         function_args   =  6,
         worker_threads  = 11,
     };
+
+
+    enum class function_flags : int {
+        none            = 0,
+        deterministic   = 0x000000800,  // same args will always return the same result
+        direct_only     = 0x000080000,  // cannot be used in VIEWs or TRIGGERs
+        subtype         = 0x000100000,  // window functions only: may inspect sub-types of args
+        innocuous       = 0x000200000,  // no side effects, accesses nothing but its args
+    };
+    inline function_flags operator| (function_flags a, function_flags b) {
+        return function_flags(int(a) | int(b));}
 
 
     using db_handle = std::shared_ptr<sqlite3>;
@@ -213,7 +225,6 @@ namespace sqnice {
         /// True if a transaction or savepoint is active.
         bool in_transaction() const noexcept;
 
-
 #pragma mark - EXECUTING:
 
         /** Executes a (non-`SELECT`) statement, or multiple statements separated by `;`. */
@@ -232,6 +243,69 @@ namespace sqnice {
         /// @note This object comes from an internal `command_cache`, so subsequent calls with the
         ///       same SQL string will use the precompiled statement instead of compiling it again.
         [[nodiscard]] sqnice::query query(std::string_view sql);
+
+        /// Low-level transaction support: begins a transaction.
+        /// Transactions can nest; nested transactions are implemented as savepoints.
+        /// @param immediate  If true, the database immediately acquires an exclusive lock.
+        status beginTransaction(bool immediate);
+
+        /// Low-level transaction support: ends a (possibly nested) transaction.
+        /// @param commit  If true, commits the transaction; if false, aborts.
+        status endTransaction(bool commit);
+
+        /// The number of beginTransaction calls not balanced by endTransaction.
+        int transaction_depth() const noexcept          {return txn_depth_;}
+
+#pragma mark - FUNCTIONS:
+
+        using function_handler = std::function<void (function_args, function_result)>;
+        using step_handler     = std::function<void (function_args)>;
+        using finish_handler   = std::function<void (function_result)>;
+
+        /// Registers a SQL function.
+        /// @param name  The SQL function name to register.
+        /// @param h  The function that will be called. It gets arg values from the `function_args`
+        ///             argument, and returns a result by assigning to the `function_result`.
+        status create_function(std::string_view name, 
+                               function_handler h,
+                               int nargs = -1,
+                               function_flags = {});
+
+        /// Registers a SQL function. This variant takes care of marshaling the args & return value.
+        /// @note  You must include "sqnice/functions.hh" or you'll get compile errors.
+        template <class F>
+        status create_function(std::string_view name, 
+                               std::function<F> h,
+                               function_flags flags = {})
+        {
+            auto fh = new std::function<F>(std::move(h));
+            auto destroy = [](void* pApp) {delete static_cast<std::function<F>*>(pApp);};
+            return create_function_impl<F>()(*this, name, flags, fh, destroy);
+        }
+
+        /// Registers a SQL aggregate function.
+        /// @param name  The SQL name of the function.
+        /// @param step  A function that takes `nargs` arguments.
+        /// @param finish  A function that takes no arguments and sets the aggregate's result.
+        /// @param nargs  The number of arguments the function takes; -1 allows any number.
+        status create_aggregate(std::string_view name,
+                                step_handler step, finish_handler finish,
+                                int nargs = -1,
+                                function_flags = {});
+
+        /// Registers an aggregate function.
+        /// This variant takes care of marshaling the args & return values.
+        /// The template argument `T` must be a class or struct with two public instance methods:
+        /// - `step`, whose parameter types are the `Ps...` template args
+        /// - `finish`, which takes no args and returns your aggregate's type.
+        /// For examples, see the test case "SQNice aggregate functions" in testfunctions.cc.
+        /// @note  You must include "sqnice/functions.hh" or you'll get compile errors.
+        template <class T, class... Ps>
+        status create_aggregate(std::string_view name,
+                                function_flags flags = {}) {
+            return register_function(name, sizeof...(Ps), flags, nullptr,
+                                     nullptr, stepx_impl<T, Ps...>, finishN_impl<T>, nullptr);
+        }
 
 
 #pragma mark - MAINTENANCE
@@ -290,24 +364,39 @@ namespace sqnice {
         void set_update_handler(update_handler) noexcept;
         void set_authorize_handler(authorize_handler) noexcept;
 
-        /// Low-level transaction support: begins a transaction. 
-        /// Transactions can nest; nested transactions are implemented as savepoints.
-        /// @param immediate  If true, the database immediately acquires an exclusive lock.
-        status beginTransaction(bool immediate);
+        using argv_t = sqlite3_value* _Nullable * _Nullable;
+        using callFn = void (*)(sqlite3_context*, int, argv_t);
+        using finishFn = void (*)(sqlite3_context*);
+        using destroyFn = void (*)(void*);
 
-        /// Low-level transaction support: ends a (possibly nested) transaction.
-        /// @param commit  If true, commits the transaction; if false, aborts.
-        status endTransaction(bool commit);
-
-        /// The number of beginTransaction calls not balanced by endTransaction.
-        int transaction_depth() const noexcept          {return txn_depth_;}
+        status register_function(std::string_view name,
+                                 int nArgs,
+                                 function_flags,
+                                 void* _Nullable pApp,
+                                 callFn _Nullable call,
+                                 callFn _Nullable step,
+                                 finishFn _Nullable finish,
+                                 destroyFn _Nullable destroy);
 
     private:
-        friend class aggregates;
         friend class blob_stream;
         friend class checking;
-        friend class functions;
         friend class statement;
+
+        // internal gunk used by create_function and create_aggregate.
+        // Implementations in functions.hh.
+        using pfunction_base = std::shared_ptr<void>;
+        template <class R, class... Ps> static void functionx_impl(sqlite3_context*, int, argv_t);
+        template <class T, class... Ps>static void stepx_impl(sqlite3_context*, int, argv_t);
+        template <class T> static void finishN_impl(sqlite3_context*);
+        template<class R, class... Ps> struct create_function_impl;
+        template<class R, class... Ps> struct create_function_impl<R (Ps...)> {
+            status operator()(database& db, std::string_view name, function_flags flags, 
+                              void* fh, destroyFn destroy) {
+                return db.register_function(name, sizeof...(Ps), flags, fh, functionx_impl<R, Ps...>,
+                                            nullptr, nullptr, destroy);
+            }
+        };
 
     private:
         db_handle           db_;

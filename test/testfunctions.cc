@@ -9,20 +9,20 @@ namespace {
         return 100;
     }
 
-    void test1(sqnice::context& ctx)
+    void test1(sqnice::function_args argv, sqnice::function_result result)
     {
-        ctx.result = 200;
+        result = 200;
     }
 
-    void test2(sqnice::context& ctx)
+    void test2(sqnice::function_args argv, sqnice::function_result result)
     {
-        std::string args = ctx.argv[0];
-        ctx.result = args;
+        std::string arg = argv[0];
+        result = arg;
     }
 
-    void test3(sqnice::context& ctx)
+    void test3(sqnice::function_args argv, sqnice::function_result result)
     {
-        ctx.result = ctx.argv[0];
+        result = argv[0];
     }
 
     std::string test6(std::string const& s1, std::string const& s2, std::string const& s3)
@@ -32,8 +32,8 @@ namespace {
 }
 
 TEST_CASE_METHOD(sqnice_test, "SQNice function", "[sqnice]") {
-    sqnice::functions func(db);
-    func.create<int ()>("test_fn", []{return 100;});
+    db.create_function<int ()>("test_fn", []{return 100;},
+                               sqnice::function_flags::deterministic | sqnice::function_flags::innocuous);
 
     sqnice::query qry(db, "SELECT test_fn()");
     auto iter = qry.begin();
@@ -42,8 +42,7 @@ TEST_CASE_METHOD(sqnice_test, "SQNice function", "[sqnice]") {
 }
 
 TEST_CASE_METHOD(sqnice_test, "SQNice function args", "[sqnice]") {
-    sqnice::functions func(db);
-    func.create<string (string)>("test_fn", [](const string& name){
+    db.create_function<string (string)>("test_fn", [](const string& name){
         return "Hello " + name;
     });
 
@@ -59,14 +58,13 @@ TEST_CASE_METHOD(sqnice_test, "SQNice function args", "[sqnice]") {
 TEST_CASE("SQNice functions", "[sqnice]") {
     sqnice::database db = sqnice::database::temporary();
 
-    sqnice::functions func(db);
-    func.create<int ()>("h0", &test0);
-    func.create("h1", &test1, 0);
-    func.create("h2", &test2, 1);
-    func.create("h3", &test3, 1);
-    func.create<int ()>("h4", []{return 500;});
-    func.create<int (int)>("h5", [](int i){return i + 1000;});
-    func.create<string (string, string, string)>("h6", &test6);
+    db.create_function<int ()>("h0", &test0);
+    db.create_function("h1", &test1, 0);
+    db.create_function("h2", &test2, 1);
+    db.create_function("h3", &test3, 1);
+    db.create_function<int ()>("h4", []{return 500;});
+    db.create_function<int (int)>("h5", [](int i){return i + 1000;});
+    db.create_function<string (string, string, string)>("h6", &test6);
 
     sqnice::query qry(db, "SELECT h0(), h1(), h2('x'), h3('y'), h4(), h5(10), h6('a', 'b', 'c')");
 
@@ -148,8 +146,7 @@ namespace {
 }
 
 TEST_CASE_METHOD(sqnice_test, "SQNice aggregate", "[sqnice]") {
-    sqnice::functions aggr(db);
-    aggr.create_aggregate<strlen_aggr, string>("strlen_aggr");
+    db.create_aggregate<strlen_aggr, string>("strlen_aggr");
 
     db.execute("INSERT INTO contacts (name, phone) VALUES ('Mike', '555-1234')");
     db.execute("INSERT INTO contacts (name, phone) VALUES ('Janette', '555-4321')");
@@ -164,12 +161,11 @@ TEST_CASE("SQNice aggregate functions", "[.sqnice]") {
     //FIXME: Needs a pre-populated database
     sqnice::database db("foods.db", sqnice::open_flags::readonly);
 
-    sqnice::functions aggr(db);
-    aggr.create_aggregate<mysum<string>, string>("a2");
-    aggr.create_aggregate<mysum<int>, int>("a3");
-    aggr.create_aggregate<mycnt>("a4");
-    aggr.create_aggregate<strcnt, string>("a5");
-    aggr.create_aggregate<plussum, int, int>("a6");
+    db.create_aggregate<mysum<string>, string>("a2");
+    db.create_aggregate<mysum<int>, int>("a3");
+    db.create_aggregate<mycnt>("a4");
+    db.create_aggregate<strcnt, string>("a5");
+    db.create_aggregate<plussum, int, int>("a6");
 
     sqnice::query qry(db, "SELECT a2(type_id), a3(id), a4(), a5(name), sum(type_id), a6(id, type_id) FROM foods");
 

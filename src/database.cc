@@ -85,6 +85,8 @@ namespace sqnice {
     static_assert(int(limit::function_args)     == SQLITE_LIMIT_FUNCTION_ARG);
     static_assert(int(limit::worker_threads)    == SQLITE_LIMIT_WORKER_THREADS);
 
+    static_assert(int(function_flags::deterministic) == SQLITE_DETERMINISTIC);
+    static_assert(int(function_flags::direct_only)   == SQLITE_DIRECTONLY);
 
     database_error::database_error(char const* msg, status rc)
     : std::runtime_error(msg)
@@ -244,13 +246,13 @@ namespace sqnice {
                 }
             };
             db_ = std::shared_ptr<sqlite3>(db, close_db);
-            
+
         } else {
             if (exceptions_) {
                 std::string message;
                 if (db) {
                     message = sqlite3_errmsg(db);
-                    (void)sqlite3_close_v2(db);
+            (void)sqlite3_close_v2(db);
                 } else {
                     message = "can't open database";
                 }
@@ -631,6 +633,21 @@ namespace sqnice {
     void database::set_authorize_handler(authorize_handler h) noexcept {
         ah_ = h;
         sqlite3_set_authorizer(check_handle(), ah_ ? authorizer_impl : nullptr, &ah_);
+    }
+
+    status database::register_function(string_view name, 
+                                       int nArgs,
+                                       function_flags flags,
+                                       void* _Nullable pApp,
+                                       callFn _Nullable call,
+                                       callFn _Nullable step,
+                                       finishFn _Nullable finish,
+                                       destroyFn _Nullable destroy)
+    {
+        return check( sqlite3_create_function_v2(check_handle(),
+                                                 string(name).c_str(), nArgs, 
+                                                 SQLITE_UTF8 | int(flags),
+                                                 pApp, call, step, finish, destroy) );
     }
 
 }
