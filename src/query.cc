@@ -26,6 +26,7 @@
 
 #include "sqnice/query.hh"
 #include "sqnice/database.hh"
+#include "sqnice/functions.hh"
 #include <cassert>
 
 #ifdef SQNICE_LOADABLE_EXTENSION
@@ -187,6 +188,22 @@ namespace sqnice {
             throw logic_error("command or query is in use by an iterator");
     }
 
+    std::string_view statement::sql() const {
+        string_view result;
+        if (const char* sql = sqlite3_sql(any_stmt()))
+            result = sql;
+        return result;
+    }
+
+    std::string statement::expanded_sql() const {
+        string result;
+        if (char* sql = sqlite3_expanded_sql(any_stmt())) {
+            result = sql;
+            sqlite3_free(sql);
+        }
+        return result;
+    }
+
     bool statement::busy() const noexcept {
         return impl_ && sqlite3_stmt_busy(impl_->stmt);
     }
@@ -229,23 +246,25 @@ namespace sqnice {
     }
 
     status statement::bind(int idx, char const* value, copy_semantic fcopy) {
-        return check_bind(sqlite3_bind_text(stmt(), idx, value, int(std::strlen(value)),
-                                            as_dtor(fcopy)));
-    }
-
-    status statement::bind(int idx, blob value) {
-        return check_bind(sqlite3_bind_blob(stmt(), idx, value.data, int(value.size),
-                                            as_dtor(value.fcopy)));
-    }
-
-    status statement::bind(int idx, std::span<const std::byte> value, copy_semantic fcopy) {
-        return check_bind(sqlite3_bind_blob(stmt(), idx, value.data(), int(value.size_bytes()),
-                                            as_dtor(fcopy) ));
+        return bind(idx, string_view(value), fcopy);
     }
 
     status statement::bind(int idx, std::string_view value, copy_semantic fcopy) {
-        return check_bind(sqlite3_bind_text(stmt(), idx, value.data(), int(value.size()),
-                                            as_dtor(fcopy) ));
+        return check_bind(sqlite3_bind_text64(stmt(), idx, value.data(), value.size(),
+                                              as_dtor(fcopy), SQLITE_UTF8));
+    }
+
+    status statement::bind(int idx, blob value) {
+        if (value.data)
+            return check_bind(sqlite3_bind_blob64(stmt(), idx, value.data, value.size,
+                                                  as_dtor(value.fcopy)));
+        else
+            return check_bind(sqlite3_bind_zeroblob64(stmt(), idx, value.size));
+    }
+
+    status statement::bind(int idx, std::span<const std::byte> value, copy_semantic fcopy) {
+        return check_bind(sqlite3_bind_blob64(stmt(), idx, value.data(), value.size_bytes(),
+                                              as_dtor(fcopy) ));
     }
 
     status statement::bind_pointer(int idx, void* ptr, const char* type, pointer_destructor dtor) {
@@ -254,6 +273,10 @@ namespace sqnice {
 
     status statement::bind(int idx, nullptr_t) {
         return check_bind(sqlite3_bind_null(stmt(), idx));
+    }
+
+    status statement::bind(int idx, arg_value v) {
+        return check_bind(sqlite3_bind_value(stmt(), idx, v.value()));
     }
 
     statement::bindref statement::operator[] (char const *name) {

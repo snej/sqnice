@@ -29,9 +29,7 @@
 
 #include "sqnice/database.hh"
 #include "sqnice/query.hh"
-//#include <sqlite3.h>    //TODO: Remove this dependency
 #include <cstddef>
-#include <map>
 #include <memory>
 #include <tuple>
 #include <type_traits>
@@ -47,8 +45,6 @@ namespace sqnice {
     class context;
     class function_result;
 
-    using argv_t = sqlite3_value* _Nullable * _Nullable;
-
 
     /** The concept `resultable` identifies custom types that can be assigned as a function result.
          Declare a function `sqlite3cpp::result_helper(context&, T)`.
@@ -62,14 +58,14 @@ namespace sqnice {
     /** The array of arguments passed to a function call. */
     class function_args : noncopyable {
     public:
+        function_args(int argc, database::argv_t argv)  :argc_(argc), argv_(argv) { }
+
         arg_value operator[] (size_t i) const;
-        size_t size() const                         {return argc_;}
+        size_t size() const                             {return argc_;}
 
     private:
-        friend class context;
-        function_args(int argc, argv_t argv)                 :argc_(argc), argv_(argv) { }
-        int const     argc_;
-        argv_t const  argv_;
+        int const               argc_;
+        database::argv_t const  argv_;
     };
 
 
@@ -95,22 +91,22 @@ namespace sqnice {
                 set_uint64(v);
         }
 
-        void operator= (std::floating_point auto v)     {set_double(v);}
-        void operator= (nullptr_t);
-        void operator= (null_type)                      {*this = nullptr;}
-        void operator= (arg_value const&);
+        void operator= (std::floating_point auto v) noexcept     {set_double(v);}
+        void operator= (nullptr_t) noexcept;
+        void operator= (null_type) noexcept                      {*this = nullptr;}
+        void operator= (arg_value const&) noexcept;
 
-        void operator= (char const* _Nullable value)    {set(value);}
-        void operator= (std::string_view value)         {set(value);}
-        void operator= (blob const&);
-        void operator= (std::span<const std::byte> value) {set(value);}
+        void operator= (char const* _Nullable value) noexcept    {set(value);}
+        void operator= (std::string_view value) noexcept         {set(value);}
+        void operator= (blob const&) noexcept;
+        void operator= (std::span<const std::byte> value) noexcept {set(value);}
 
-        void set(char const* _Nullable value, copy_semantic = copy);
-        void set(std::string_view value, copy_semantic = copy);
-        void set(std::span<const std::byte> value, copy_semantic = copy);
+        void set(char const* _Nullable value, copy_semantic = copy) noexcept;
+        void set(std::string_view value, copy_semantic = copy) noexcept;
+        void set(std::span<const std::byte> value, copy_semantic = copy) noexcept;
 
         template <resultable T>
-        void operator= (T&& v) {
+        void operator= (T&& v) noexcept {
             set_helper(*this, std::forward<T>(v));
         }
 
@@ -118,19 +114,21 @@ namespace sqnice {
 
         /// Sets the result to an opaque pointer value.
         /// @note see <https://sqlite.org/bindptr.html>
-        void set_pointer(void* pointer, const char* type, pointer_destructor);
+        void set_pointer(void* pointer, const char* type, pointer_destructor) noexcept;
+
+        void set_subtype(unsigned) noexcept;
 
         /// Sets the result to an error.
-        void operator= (database_error const& x)        {set_error(x.what(), x.error_code);}
-        void set_error(std::string_view msg, status = status::error);
+        void operator= (database_error const& x) noexcept        {set_error(x.what(), x.error_code);}
+        void set_error(std::string_view msg, status = status::error) noexcept;
 
     private:
         friend class context;
-        explicit function_result(sqlite3_context* ctx)   :ctx_(ctx) { }
-        void set_int(int value);
-        void set_int64(int64_t value);
-        void set_uint64(uint64_t value);
-        void set_double(double value);
+        explicit function_result(sqlite3_context* ctx) noexcept   :ctx_(ctx) { }
+        void set_int(int value) noexcept;
+        void set_int64(int64_t value) noexcept;
+        void set_uint64(uint64_t value) noexcept;
+        void set_double(double value) noexcept;
 
         sqlite3_context* ctx_;
     };
@@ -139,11 +137,11 @@ namespace sqnice {
     /** The context of a SQLite function call. Holds the arguments and result. */
     class context : noncopyable {
     public:
-        explicit context(sqlite3_context* ctx, int nargs = 0, argv_t values = nullptr);
+        explicit context(sqlite3_context*, int nargs = 0, database::argv_t = nullptr) noexcept;
 
         size_t const    argc;       ///< The number of arguments
         function_args   argv;       ///< The "array" of arguments
-        function_result  result;     ///< Assign the result to this
+        function_result result;     ///< Assign the result to this
 
         /// Gets the `idx`th arg as type `T`. Equivalent to `T t = argv[idx];`
         template <class T> T get(int idx) const;
@@ -151,8 +149,8 @@ namespace sqnice {
     private:
         friend class database;
 
-        void* _Nullable user_data();
-        void* _Nullable aggregate_data(int size);
+        void* _Nullable user_data() noexcept;
+        void* _Nullable aggregate_data(int size) noexcept;
 
         template <class T>
         T* _Nonnull aggregate_state() {
@@ -178,9 +176,6 @@ namespace sqnice {
         static inline std::tuple<> to_tuple_impl(int /*index*/, const context& /*c*/, std::tuple<>&&) {
             return std::tuple<>();
         }
-
-    private:
-        sqlite3_context* ctx_;
     };
 
 
@@ -192,6 +187,7 @@ namespace sqnice {
 
         /// The data type of the value.
         data_type type() const noexcept;
+        unsigned subtype() const noexcept;
         bool not_null() const noexcept                  {return type() != data_type::null;}
         bool is_blob() const noexcept                   {return type() == data_type::blob;}
 

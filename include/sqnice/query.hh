@@ -42,6 +42,7 @@ ASSUME_NONNULL_BEGIN
 struct sqlite3_stmt;
 
 namespace sqnice {
+    class arg_value;
     class database;
     class statement;
     class column_value;
@@ -96,6 +97,14 @@ namespace sqnice {
         /// True if the statement contains SQL and can be executed.
         bool prepared() const                           {return impl_ != nullptr;}
         explicit operator bool() const                  {return prepared();}
+
+        /// The original SQL of the compiled statement.
+        /// @note The string remains valid until `finish`, `prepare` or the destructor are called.
+        std::string_view sql() const;
+
+        /// The SQL of the compiled statement,
+        /// with parameters (like "?1") replaced by their current bindings.
+        std::string expanded_sql() const;
 
         /// True if the statement is running; `reset` clears this.
         bool busy() const noexcept;
@@ -154,6 +163,8 @@ namespace sqnice {
 
         status bind(int idx, null_type)                     {return bind(idx, nullptr);}
         status bind(int idx, nullptr_t);
+
+        status bind(int idx, arg_value);
 
         template <bindable T>
         status bind(int idx, T&& v) {

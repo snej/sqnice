@@ -35,60 +35,67 @@ namespace sqnice {
         return cs == copy ? SQLITE_TRANSIENT : SQLITE_STATIC;
     }
 
-    context::context(sqlite3_context* ctx, int nargs, argv_t values)
+    context::context(sqlite3_context* ctx, int nargs, database::argv_t values) noexcept
     : argc(nargs)
     , argv(nargs, values)
     , result(ctx)
-    , ctx_(ctx)
     { }
 
 
 #pragma mark - CONTEXT RESULT:
 
 
-    void function_result::set_int(int value) {
+    void function_result::set_int(int value) noexcept {
         sqlite3_result_int(ctx_, value);
     }
 
-    void function_result::set_int64(int64_t value) {
+    void function_result::set_int64(int64_t value) noexcept {
         sqlite3_result_int64(ctx_, value);
     }
 
-    void function_result::set_double(double value) {
+    void function_result::set_double(double value) noexcept {
         sqlite3_result_double(ctx_, value);
     }
 
-    void function_result::set(std::string_view value, copy_semantic fcopy) {
-        sqlite3_result_text(ctx_, value.data(), int(value.size()), as_dtor(fcopy));
+    void function_result::set(std::string_view value, copy_semantic fcopy) noexcept {
+        sqlite3_result_text64(ctx_, value.data(), value.size(), as_dtor(fcopy), SQLITE_UTF8);
     }
 
-    void function_result::set(char const* value, copy_semantic fcopy) {
-        sqlite3_result_text(ctx_, value, int(std::strlen(value)), as_dtor(fcopy));
+    void function_result::set(char const* value, copy_semantic fcopy) noexcept {
+        set(std::string_view(value), fcopy);
     }
 
-    void function_result::operator= (blob const& value) {
-        sqlite3_result_blob(ctx_, value.data, int(value.size), as_dtor(value.fcopy));
+    void function_result::operator= (blob const& value) noexcept {
+        if (value.data)
+            sqlite3_result_blob64(ctx_, value.data, value.size, as_dtor(value.fcopy));
+        else
+            sqlite3_result_zeroblob64(ctx_, value.size);
     }
 
-    void function_result::operator= (nullptr_t) {
+    void function_result::operator= (nullptr_t) noexcept {
         sqlite3_result_null(ctx_);
     }
 
-    void function_result::operator= (arg_value const& arg) {
+    void function_result::operator= (arg_value const& arg) noexcept {
         sqlite3_result_value(ctx_, arg.value());
     }
 
-    void function_result::set_error(string_view msg, status s) {
+    void function_result::set_subtype(unsigned subtype) noexcept {
+        sqlite3_result_subtype(ctx_, subtype);
+    }
+
+
+    void function_result::set_error(string_view msg, status s) noexcept {
         sqlite3_result_error(ctx_, msg.data(), int(msg.size()));
         sqlite3_result_error_code(ctx_, int(s));
     }
 
-    void* context::aggregate_data(int size) {
-        return sqlite3_aggregate_context(ctx_, size);
+    void* context::aggregate_data(int size) noexcept {
+        return sqlite3_aggregate_context(result.ctx_, size);
     }
 
-    void* context::user_data() {
-        return sqlite3_user_data(ctx_);
+    void* context::user_data() noexcept {
+        return sqlite3_user_data(result.ctx_);
     }
 
     
@@ -104,6 +111,10 @@ namespace sqnice {
 
     data_type arg_value::type() const noexcept {
         return data_type{sqlite3_value_type(value_)};
+    }
+
+    unsigned arg_value::subtype() const noexcept {
+        return sqlite3_value_subtype(value_);
     }
 
     size_t arg_value::size_bytes() const noexcept {
