@@ -87,7 +87,7 @@ namespace sqnice {
         none            = 0,
         deterministic   = 0x000000800,  // same args will always return the same result
         direct_only     = 0x000080000,  // cannot be used in VIEWs or TRIGGERs
-        subtype         = 0x000100000,  // window functions only: may inspect sub-types of args
+        subtype         = 0x000100000,  // implementation gets or sets subtypes of values
         innocuous       = 0x000200000,  // no side effects, accesses nothing but its args
     };
     inline function_flags operator| (function_flags a, function_flags b) {
