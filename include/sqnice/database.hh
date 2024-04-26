@@ -101,19 +101,14 @@ namespace sqnice {
     /** A SQLite database connection. */
     class database : public checking, noncopyable {
     public:
-        /// Opens a SQLite database file. Details depend on the flags.
+        /// Constructs a `database` and opens a SQLite database file. Details depend on the flags.
         /// Exceptions are enabled by default! If you want to open a database without potentially
         /// throwing an exception, use the no-arguments constructor instead, then call
         /// `exceptions(false)` and then `connect(filename,...)`.
         /// @throws database_error if the database cannot be opened.
         explicit database(std::string_view filename,
                           open_flags flags           = open_flags::readwrite | open_flags::create,
-                          const char*  _Nullable vfs = nullptr);
-
-        /// Opens a temporary anonymous SQLite database.
-        /// @param on_disk  If false, the database is stored in memory;
-        ///                 if true, in a temporary file on disk (deleted on close.)
-        static database temporary(bool on_disk = false);
+                          const char* _Nullable vfs  = nullptr);
 
         /// Constructs an instance that uses an already-open SQLite database handle.
         /// Its destructor, and the `close` method, will not close this handle.
@@ -127,10 +122,16 @@ namespace sqnice {
         database& operator=(database&& db) noexcept;
         ~database() noexcept;
 
-        /// Closes any existing connection and opens a new database file.
-        status connect(std::string_view filename,
-                       open_flags flags           = open_flags::readwrite | open_flags::create,
-                       const char*  _Nullable vfs = nullptr);
+        /// Opens (connects to) a database file. Any existing connection is closed first.
+        status open(std::string_view filename,
+                    open_flags flags           = open_flags::readwrite | open_flags::create,
+                    const char*  _Nullable vfs = nullptr);
+
+        /// Opens a new, temporary and anonymous SQLite database.
+        /// Any existing connection is closed first.
+        /// @param on_disk  If false, the database is stored in memory;
+        ///                 if true, in a temporary file on disk (deleted on close.)
+        status open_temporary(bool on_disk = false);
 
         /// Closes the database connection. (If there is none, does nothing.)
         ///
@@ -150,14 +151,23 @@ namespace sqnice {
         status close(bool immediately = true);
 
         /// The filename (path) of the open database, as passed to the constructor or `connect`.
-        const char* filename() const noexcept;
+        [[nodiscard]] const char* filename() const noexcept;
+
+        /// True if a database connection is open.
+        [[nodiscard]] bool is_open() const noexcept         {return db_ != nullptr;}
 
         /// True if the database is writeable, false if read-only.
         /// This depends on the database file's permissions as well as the flags used to open it.
-        bool writeable() const noexcept;
+        [[nodiscard]] bool is_writeable() const noexcept;
+
+        /// True if the database is in-memory or in a temporary directory (or closed.)
+        [[nodiscard]] bool is_temporary() const noexcept    {return temporary_ || !db_;}
 
         /// The raw SQLite database handle, for use if you need to call a SQLite API yourself.
-        sqlite3* handle() const noexcept                {return db_.get();}
+        [[nodiscard]] sqlite3* handle() const noexcept      {return db_.get();}
+
+        /// Like `handle`, but throws an exception instead of returning `nullptr`.
+        /// @throws std::logic_error
         sqlite3* check_handle() const;
 
 
@@ -167,12 +177,14 @@ namespace sqnice {
         /// e.g. {3, 43, 1}.
         static std::tuple<int,int,int> sqlite_version() noexcept;
 
-        /// Configures the database, according to current best practices.
-        /// This is optional, but recommended. It must be called immedidately after connecting.
+        /// Configures the database according to current best practices.
+        /// This is optional, but recommended. It must be called immedidately after opening.
         ///
         /// It does the following things:
         /// * Enables foreign key checks.
         /// * Sets a busy timeout of 5 seconds.
+        /// * Enables "defensive mode", preventing some ways of corrupting a database through SQL.
+        /// * Disallows the use of double-quotes for SQL strings (an old misfeature.)
         ///
         /// If the database is writeable, it also:
         /// * Sets the journal mode to WAL
@@ -209,8 +221,10 @@ namespace sqnice {
 
 #pragma mark - STATUS:
 
-        status error_code() const noexcept            {return basic_status(extended_error_code());}
-        status extended_error_code() const noexcept;
+        /// The status of the last operation on this database or its queries/commands/blob_handles.
+        status last_status() const noexcept;
+
+        /// The error message, if any, from the last database operation.
         char const* _Nullable error_msg() const noexcept;
 
         /// The `rowid` of the last row inserted by an `INSERT` statement.
@@ -219,11 +233,19 @@ namespace sqnice {
         /// The number of rows changed by the last `execute` call or by a `command` object.
         int changes() const noexcept;
 
-        /// The total number of rows changed since the connection was opened.
+        /// The total number of rows changed _by this connection_ since it was opened.
+        /// @note If you care about changes made by other connections, use `global_changes` instead.
         int64_t total_changes() const noexcept;
+
+        /// Returns the "data version", a number which changes when the database is altered by
+        /// _any_ connection in _any_ process.
+        uint32_t global_changes() const noexcept;
 
         /// True if a transaction or savepoint is active.
         bool in_transaction() const noexcept;
+
+        /// The number of beginTransaction calls not balanced by endTransaction.
+        int transaction_depth() const noexcept          {return txn_depth_;}
 
 #pragma mark - EXECUTING:
 
@@ -246,15 +268,14 @@ namespace sqnice {
 
         /// Low-level transaction support: begins a transaction.
         /// Transactions can nest; nested transactions are implemented as savepoints.
+        /// @note It's usually better to use the higher-level `transaction` class instead.
         /// @param immediate  If true, the database immediately acquires an exclusive lock.
-        status beginTransaction(bool immediate);
+        status begin_transaction(bool immediate);
 
         /// Low-level transaction support: ends a (possibly nested) transaction.
+        /// @note It's usually better to use the higher-level `transaction` class instead.
         /// @param commit  If true, commits the transaction; if false, aborts.
-        status endTransaction(bool commit);
-
-        /// The number of beginTransaction calls not balanced by endTransaction.
-        int transaction_depth() const noexcept          {return txn_depth_;}
+        status end_transaction(bool commit);
 
 #pragma mark - FUNCTIONS:
 
@@ -383,6 +404,11 @@ namespace sqnice {
         friend class checking;
         friend class statement;
 
+        void set_db(std::shared_ptr<sqlite3> db) {
+            db_ = std::move(db);
+            weak_db_ = db_;
+        }
+
         // internal gunk used by create_function and create_aggregate.
         // Implementations in functions.hh.
         using pfunction_base = std::shared_ptr<void>;
@@ -402,6 +428,7 @@ namespace sqnice {
         db_handle           db_;
         int                 txn_depth_ = 0;
         bool                txn_immediate_ = false;
+        bool                temporary_ = false;
         std::unique_ptr<database_error> posthumous_error_;
         std::unique_ptr<statement_cache<sqnice::command>> commands_;
         std::unique_ptr<statement_cache<sqnice::query>> queries_;

@@ -53,12 +53,25 @@ namespace sqnice {
         ///     will try to grab the lock but will fail if another transaction is active.
         /// @param autocommit  If true, the transaction will automatically commit when
         ///     the object exits scope (unless it's because an exception is being thrown.)
-        /// @throws database_error on any error (whether or not database.exceptions() is true)
+        /// @throws database_error on any error, whether or not database.exceptions() is true.
+        ///     If you want to use this class without exceptions, call the no-args constructor
+        ///     and then `begin`, which does return an error code.
         explicit transaction(database& db,
                              bool immediate = true,
                              bool autocommit = false);
         transaction(transaction&&) noexcept;
         ~transaction() noexcept;
+
+        /// Constructs a `transaction` but does not begin it yet. Call `begin` next.
+        transaction() = default;
+
+        /// The transaction's database. Throws if the transaction isn't active.
+        database& active_database() const;
+
+        /// Begins a transaction. For use with the no-arguments constructor.
+        status begin(database& db,
+                     bool immediate = true,
+                     bool autocommit = false);
 
         /// Commits the transaction.
         status commit()     {return end(true);}
@@ -71,9 +84,8 @@ namespace sqnice {
     private:
         status end(bool commit);
 
-        database& db_;
-        bool active_;
-        bool autocommit_;
+        database* _Nullable db_ = nullptr;
+        bool                autocommit_ = false;
     };
 
 }

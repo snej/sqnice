@@ -48,6 +48,7 @@ endif()
 
 
 add_library( sqnice STATIC
+    src/base.cc
     src/blob_stream.cc
     src/database.cc
     src/functions.cc
@@ -59,6 +60,9 @@ target_include_directories( sqnice PUBLIC
     include/
 )
 
+target_link_libraries( sqnice INTERFACE
+    sqlite3
+)
 
 #### TESTS
 
@@ -72,6 +76,5 @@ add_executable( sqnice_tests
 
 target_link_libraries( sqnice_tests
     sqnice
-    sqlite3
 )
 

@@ -56,7 +56,8 @@ TEST_CASE_METHOD(sqnice_test, "SQNice function args", "[sqnice]") {
 }
 
 TEST_CASE("SQNice functions", "[sqnice]") {
-    sqnice::database db = sqnice::database::temporary();
+    sqnice::database db;
+    db.open_temporary();
 
     db.create_function<int ()>("h0", &test0);
     db.create_function("h1", &test1, 0);

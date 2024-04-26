@@ -27,15 +27,10 @@
 #ifndef SQNICE_H
 #define SQNICE_H
 
-// Umbrella header that includes [most of] the sqnice headers.
+// Umbrella header that includes the commonly-used sqnice headers.
 
-#include "sqnice/base.hh"
 #include "sqnice/database.hh"
 #include "sqnice/query.hh"
 #include "sqnice/transaction.hh"
-
-//#include "sqnice/blob_stream.hh"
-//#include "sqnice/functions.hh"
-//#include "sqnice/statement_cache.hh"
 
 #endif

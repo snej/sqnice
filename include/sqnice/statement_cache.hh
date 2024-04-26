@@ -74,7 +74,7 @@ namespace sqnice {
         void clear()                                    {stmts_.clear();}
 
     private:
-        std::unordered_map<std::string,STMT>    stmts_;
+        std::unordered_map<std::string,STMT> stmts_;
     };
 
     /** A cache of pre-compiled `command` objects. */

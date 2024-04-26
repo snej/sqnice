@@ -42,18 +42,25 @@ namespace sqnice {
         /// Opens a handle for reading a blob.
         /// @note  If the blob doesn't exist, the behavior depends on the database's `exceptions`
         ///     status. If they're enabled, this will throw an exception. If not, it will return
-        ///     normally, but `status` will return the error, and all reads will fail.
+        ///     normally, but `last_status` will return the error, and all reads will fail.
         /// @param db  The `database` handle.
-        /// @param database  The "symbolic name" of the database:
-        ///     - For the main database file: "main".
-        ///     - For TEMP tables: "temp".
-        ///     - For attached databases: the name that appears after `AS` in the ATTACH statement.
         /// @param table  The name of the table.
         /// @param column  The name of the table column.
         /// @param rowid  The row ID containing the blob.
         /// @param writeable  True if you want to write to the data.
         blob_stream(database& db,
-                    const char *database,
+                    const char* table,
+                    const char *column,
+                    int64_t rowid,
+                    bool writeable);
+
+        /// Alternative constructor that also takes a `database_name` parameter, which is the
+        /// "symbolic name" of the database:
+        /// - For the main database file: "main".
+        /// - For TEMP tables: "temp".
+        /// - For attached databases: the name that appears after `AS` in the `ATTACH` statement.
+        blob_stream(database& db,
+                    const char *database_name,
                     const char* table,
                     const char *column,
                     int64_t rowid,

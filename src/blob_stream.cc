@@ -38,12 +38,19 @@ namespace sqnice {
     using namespace std;
 
     blob_stream::blob_stream(database& db,
-                             const char *database,
+                             const char* table, const char *column, int64_t rowid,
+                             bool writeable)
+    :blob_stream(db, "main", table, column, rowid, writeable)
+    { }
+
+
+    blob_stream::blob_stream(database& db,
+                             const char *database_name,
                              const char* table, const char *column, int64_t rowid,
                              bool writeable)
     : checking(db)
     {
-        status_ = status{sqlite3_blob_open(db.check_handle(), database, table, column, 
+        status_ = status{sqlite3_blob_open(db.check_handle(), database_name, table, column, 
                                            rowid, writeable, &blob_)};
         check(status_);
         if (status_ == status::ok)

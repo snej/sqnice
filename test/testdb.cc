@@ -8,7 +8,8 @@ TEST_CASE_METHOD(sqnice_test, "SQNice insert", "[sqnice]") {
     db.execute("INSERT INTO contacts (name, phone) VALUES ('AAAA', '1234')");
 
     {
-        sqnice::transaction xct(db);
+        sqnice::transaction xct;
+        xct.begin(db);
 
         sqnice::command cmd(db, "INSERT INTO contacts (name, phone) VALUES (?, ?)");
 
@@ -50,9 +51,9 @@ TEST_CASE_METHOD(sqnice_test, "SQNice insert_execute", "[sqnice]") {
 TEST_CASE_METHOD(sqnice_test, "SQNice invalid path", "[.sqnice]") {
     sqnice::database bad_db;
     bad_db.exceptions(false);
-    auto rc = bad_db.connect("/test/invalid/path");
+    auto rc = bad_db.open("/test/invalid/path");
     CHECK(rc == sqnice::status::cantopen);
-    CHECK(bad_db.error_code() == sqnice::status::cantopen);
+    CHECK(bad_db.last_status() == sqnice::status::cantopen);
     CHECK(bad_db.error_msg() != nullptr);
 }
 
@@ -67,7 +68,8 @@ TEST_CASE_METHOD(sqnice_test, "SQNice close", "[sqnice]") {
 }
 
 TEST_CASE_METHOD(sqnice_test, "SQNice backup", "[sqnice]") {
-    sqnice::database backupdb = sqnice::database::temporary();
+    sqnice::database backupdb;
+    backupdb.open_temporary();
 
     db.backup(backupdb,
               [](int pagecount, int remaining, sqnice::status rc) {

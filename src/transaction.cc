@@ -38,44 +38,63 @@ SQLITE_EXTENSION_INIT1
 namespace sqnice {
     using namespace std;
 
-    transaction::transaction(database& db, bool auto_commit, bool immediate)
-    : db_(db)
-    , active_(true)
-    , autocommit_(auto_commit)
-    {
-        status rc = db_.beginTransaction(immediate);
-        if (!ok(rc))
-            db_.raise(rc);  // always throw -- constructor cannot return a status
+    transaction::transaction(database& db, bool autocommit, bool immediate) {
+        status rc = begin(db, autocommit, immediate);
+        if (!ok(rc)) [[unlikely]]
+            db.raise(rc);  // always throw -- constructor cannot return a status
     }
 
     transaction::transaction(transaction &&t) noexcept
     : db_(t.db_)
-    , active_(t.active_)
     , autocommit_(t.autocommit_)
     {
-        t.active_ = false;
+        t.db_ = nullptr;
     }
 
+    status transaction::begin(database& db, bool autocommit, bool immediate) {
+        if (db_) [[unlikely]]
+            throw std::logic_error("transaction is already active");
+        status rc = db.check( db.begin_transaction(immediate) );
+        if (ok(rc)) [[likely]] {
+            db_ = &db;
+            autocommit_ = autocommit;
+        }
+        return rc;
+    }
 
     transaction::~transaction() noexcept {
-        if (active_) {
+        if (db_) {
             if (autocommit_ && !current_exception()) {
                 // It is legal (though discouraged) to throw an exception from a destructor,
                 // as long as the destructor was not called as part of unwinding the stack
                 // while an exception is thrown.
-                (void)db_.endTransaction(true);
+                (void)db_->end_transaction(true);
             } else {
-                auto x = db_.exceptions();
-                db_.exceptions(false);
-                (void)db_.endTransaction(false);
-                db_.exceptions(x);
+                // abort the transaction, being careful not to throw:
+                auto x = db_->exceptions();
+                db_->exceptions(false);
+                (void)db_->end_transaction(false);
+                db_->exceptions(x);
             }
         }
     }
 
+    database& transaction::active_database() const {
+        if (db_) [[likely]]
+            return *db_;
+        else
+            throw std::logic_error("transaction is not active");
+    }
+
     status transaction::end(bool commit) {
-        active_ = false;
-        return db_.endTransaction(commit);
+        if (auto db = db_) [[likely]] {
+            db_ = nullptr;
+            return db->end_transaction(commit);
+        } else if (commit) {
+            throw std::logic_error("transaction is not active");
+        } else {
+            return status::ok;
+        }
     }
 
 }

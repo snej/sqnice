@@ -52,8 +52,7 @@ namespace sqnice {
     database::database(string_view dbname, open_flags flags, char const* vfs)
     : checking(kExceptionsByDefault)
     {
-        connect(dbname, flags, vfs);
-        weak_db_ = db_;
+        open(dbname, flags, vfs);
     }
 
     database::database(sqlite3* pdb) noexcept
@@ -73,13 +72,14 @@ namespace sqnice {
     , ah_(std::move(db.ah_))
     {
         weak_db_ = db_;
-        db.db_ = nullptr;
+        db.weak_db_ = {};
     }
 
     database& database::operator=(database&& db) noexcept {
         static_cast<checking&>(*this) = static_cast<checking&&>(db);
-        db_ = std::move(db.db_);
-        db.db_ = nullptr;
+        set_db(db.db_);
+        set_db(std::move(db.db_));
+        db.weak_db_ = {};
         bh_ = std::move(db.bh_);
         ch_ = std::move(db.ch_);
         rh_ = std::move(db.rh_);
@@ -91,19 +91,7 @@ namespace sqnice {
 
     database::~database() noexcept = default;
 
-    database database::temporary(bool on_disk) {
-        // "If the filename is an empty string, then a private, temporary on-disk database will
-        // be created [and] automatically deleted as soon as the database connection is closed."
-        string_view name;
-        open_flags flags = open_flags::readwrite;
-        if (!on_disk) {
-            name = "temporary";
-            flags |= open_flags::memory;
-        }
-        return database(name, flags);
-    }
-
-    status database::connect(string_view dbname_, open_flags flags, char const* vfs) {
+    status database::open(string_view dbname_, open_flags flags, char const* vfs) {
         close();
 
         if (!!(flags & open_flags::memory) && !(flags & (open_flags::readwrite | open_flags::readonly)))
@@ -132,7 +120,8 @@ namespace sqnice {
                     (void)sqlite3_close_v2(db);
                 }
             };
-            db_ = shared_ptr<sqlite3>(db, close_db);
+            set_db(shared_ptr<sqlite3>(db, close_db));
+            temporary_ = !!(flags & open_flags::memory) || dbname.empty() || dbname == ":memory:";
             posthumous_error_ = nullptr;
 
         } else {
@@ -146,6 +135,18 @@ namespace sqnice {
         return rc;
     }
 
+    status database::open_temporary(bool on_disk) {
+        // "If the filename is an empty string, then a private, temporary on-disk database will
+        // be created [and] automatically deleted as soon as the database connection is closed."
+        string_view name;
+        open_flags flags = open_flags::readwrite;
+        if (!on_disk) {
+            name = "temporary";
+            flags |= open_flags::memory;
+        }
+        return open(name, flags);
+    }
+
     status database::close(bool immediately) {
         commands_.reset();
         queries_.reset();
@@ -153,7 +154,7 @@ namespace sqnice {
         if (db_) {
             if (db_.use_count() > 1)
                 return check(status::busy);
-            db_ = nullptr;
+            set_db(nullptr);
         }
         return status::ok;
     }
@@ -217,14 +218,19 @@ namespace sqnice {
     }
 
     status database::setup() {
+        assert(is_open());
         status rc = enable_foreign_keys();
         if (!ok(rc)) {return rc;}
         rc = set_busy_timeout(5000);
-        if (ok(rc) && writeable()) {
+        if (ok(rc) && is_writeable()) {
             rc = execute("PRAGMA auto_vacuum = incremental;" // must be the first statement executed
                          "PRAGMA journal_mode = WAL;"
                          "PRAGMA synchronous=normal");
         }
+        auto dbc = db_.get();
+        sqlite3_db_config(dbc, SQLITE_DBCONFIG_DEFENSIVE, 1, 0);  // disallow db corruption
+        sqlite3_db_config(dbc, SQLITE_DBCONFIG_DQS_DML,   0, 0); // disallow double-quoted strs
+        sqlite3_db_config(dbc, SQLITE_DBCONFIG_DQS_DDL,   0, 0);
         return rc;
     }
 
@@ -262,7 +268,7 @@ namespace sqnice {
         return sqlite3_db_filename(check_handle(), nullptr);
     }
 
-    status database::extended_error_code() const noexcept {
+    status database::last_status() const noexcept {
         if (db_)
             return status{sqlite3_extended_errcode(db_.get())};
         else if (posthumous_error_)
@@ -280,7 +286,7 @@ namespace sqnice {
             return nullptr;
     }
 
-    bool database::writeable() const noexcept {
+    bool database::is_writeable() const noexcept {
         return ! sqlite3_db_readonly(check_handle(), "main");
     }
 
@@ -296,6 +302,12 @@ namespace sqnice {
         return sqlite3_total_changes(check_handle());
     }
 
+    uint32_t database::global_changes() const noexcept {
+        uint32_t n;
+        sqlite3_file_control(check_handle(), "main",  SQLITE_FCNTL_DATA_VERSION, &n);
+        return n;
+    }
+
     bool database::in_transaction() const noexcept {
         return !sqlite3_get_autocommit(check_handle());
     }
@@ -304,7 +316,7 @@ namespace sqnice {
 #pragma mark - TRANSACTIONS:
 
 
-    status database::beginTransaction(bool immediate) {
+    status database::begin_transaction(bool immediate) {
         if (txn_depth_ == 0) {
             if (immediate) {
                 if (in_transaction())
@@ -329,7 +341,7 @@ namespace sqnice {
     }
 
 
-    status database::endTransaction(bool commit) {
+    status database::end_transaction(bool commit) {
         if (txn_depth_ <= 0) [[unlikely]]
             throw logic_error("transaction underflow");
         char sql[50];
@@ -382,7 +394,7 @@ namespace sqnice {
         if (!bkup) {
             // "If an error occurs within sqlite3_backup_init, then ... an error code and error
             // message are stored in the destination database connection"
-            rc = destdb.extended_error_code();
+            rc = destdb.last_status();
             if (exceptions_)
                 raise(rc, destdb.error_msg());
             return rc;
@@ -410,7 +422,7 @@ namespace sqnice {
          not consume too many CPU cycles. The constant "400" can be adjusted as needed. Values
          between 100 and 1000 work well for most applications."
          -- <https://sqlite.org/lang_analyze.html> */
-        if (!writeable())
+        if (!is_writeable())
             return status::ok;
         status rc = pragma("analysis_limit", 400);
         if (ok(rc))
@@ -427,7 +439,7 @@ namespace sqnice {
 
     optional<int64_t> database::incremental_vacuum(bool always, int64_t nPages) {
         // <https://blogs.gnome.org/jnelson/2015/01/06/sqlite-vacuum-and-auto_vacuum/>
-        if (!writeable())
+        if (!is_writeable())
             return nullopt;
         int64_t pageCount = pragma("page_count");
         bool do_it = always;
