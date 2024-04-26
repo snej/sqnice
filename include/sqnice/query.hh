@@ -71,16 +71,43 @@ namespace sqnice {
     extern null_type ignore;  //FIXME: This is awkward; get rid of it or make it constexpr
 
 
-    /** Specifies how string and blob args are bound. `copy` is safer, `nocopy` faster.*/
-    enum copy_semantic { copy, nocopy };
+    /** A type equivalent to `std::string_view` but which implies SQLite can use the pointed-to 
+        data directly instead of copying it. Used by `statement` and `function_result`. */
+    struct uncopied_string : public std::string_view {
+        explicit uncopied_string(std::string_view s) noexcept        :std::string_view(s) { }
+        explicit uncopied_string(const char* c) noexcept             :std::string_view(c) { }
+        uncopied_string(const char* c, size_t s) noexcept            :std::string_view(c, s) { }
+    };
+
+    inline uncopied_string uncopied(const char* str) noexcept         {return uncopied_string(str);}
+    inline uncopied_string uncopied(const char* c, size_t s) noexcept {return uncopied_string(c,s);}
+    inline uncopied_string uncopied(std::string_view s) noexcept      {return uncopied_string(s);}
+    inline uncopied_string uncopied(std::string&&) = delete;
 
 
-    /** A blob value to bind to a statement parameter. */
+    /** A blob value to bind to a statement parameter or assign to a function result.
+        @note  When binding or returning a `blob`, it is valid for `data` to be `nullptr`,
+               even if `size` is nonzero; this represents a SQLite "zero blob".
+               But `blob`s returned by SQLite will have non-null `data`. */
     struct blob {
+        blob(const void* _Nullable d, size_t s) noexcept            :data(d), size(s) { }
+        explicit blob(std::span<const std::byte> s) noexcept        :blob(s.data(), s.size()) { }
+
         const void* _Nullable   data  = nullptr;
         size_t                  size  = 0;
-        copy_semantic           fcopy = copy;
     };
+
+
+    /** Equivalent to `blob` but implies SQLite can use the pointed-to data directly instead of
+        copying it. Used by `statement` and `function_result`. */
+    struct uncopied_blob : public blob {
+        using blob::blob;
+        explicit uncopied_blob(blob b)  :blob(b) { }
+    };
+
+    inline uncopied_blob uncopied(const void* _Nullable d, size_t s) {return uncopied_blob(d, s);}
+    inline uncopied_blob uncopied(std::span<const std::byte> s)      {return uncopied_blob(s);}
+    inline uncopied_blob uncopied(blob const& b)                     {return uncopied_blob(b);}
 
 
     /** Abstract base class of `command` and `query`. */
@@ -155,11 +182,11 @@ namespace sqnice {
 
         status bind(int idx, std::floating_point auto v)    {return bind_double(idx, v);}
 
-        status bind(int idx, char const* _Nullable value, copy_semantic = copy);
-        status bind(int idx, std::string_view value, copy_semantic = copy);
+        status bind(int idx, std::string_view);
+        status bind(int idx, uncopied_string);
 
-        status bind(int idx, blob value);
-        status bind(int idx, std::span<const std::byte> value, copy_semantic = copy);
+        status bind(int idx, blob v)                        {return bind_blob(idx, v, true);}
+        status bind(int idx, uncopied_blob v)               {return bind_blob(idx, v, false);}
 
         status bind(int idx, null_type)                     {return bind(idx, nullptr);}
         status bind(int idx, nullptr_t);
@@ -176,14 +203,8 @@ namespace sqnice {
 
         /// Binds a value to a named parameter.
         template <typename T>
-        status bind(char const* name, T&& v)            {
+        status bind(char const* name, T&& v) {
             return bind(check_parameter_index(name), std::forward<T>(v));
-        }
-
-        /// Binds a value to a named parameter, with a copy/nocopy flag.
-        template <typename T>
-        status bind(char const* name, T&& v, copy_semantic cp)            {
-            return bind(check_parameter_index(name), std::forward<T>(v), cp);
         }
 
         sqlite3_stmt* stmt() const;
@@ -229,6 +250,7 @@ namespace sqnice {
         status bind_int64(int idx, int64_t value);
         status bind_uint64(int idx, uint64_t value);
         status bind_double(int idx, double value);
+        status bind_blob(int idx, blob value, bool copy);
 
         template <typename T, typename... Args>
         void _bind_args(int idx, T&& arg, Args... rest) {

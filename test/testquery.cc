@@ -4,12 +4,12 @@ using namespace std;
 
 TEST_CASE_METHOD(sqnice_test, "SQNice reset", "[sqnice]") {
     sqnice::command cmd(db, "INSERT INTO contacts (name, phone) VALUES (:user, :phone)");
-    cmd.bind(":user", "Mike", sqnice::nocopy);
-    cmd.bind(":phone", "555-1234", sqnice::nocopy);
+    cmd.bind(":user", sqnice::uncopied("Mike"));
+    cmd.bind(":phone", sqnice::uncopied("555-1234"));
     cmd.execute();
 
     cmd.reset();
-    cmd.bind(":user", "Janette", sqnice::nocopy);
+    cmd.bind(":user", sqnice::uncopied("Janette"));
     cmd.execute();
 
     sqnice::query qry(db, "SELECT COUNT(*) FROM contacts");
@@ -19,7 +19,7 @@ TEST_CASE_METHOD(sqnice_test, "SQNice reset", "[sqnice]") {
 
     cmd.reset();
     cmd.clear_bindings();
-    cmd.bind(":user", "Dave", sqnice::nocopy);
+    cmd.bind(":user", sqnice::uncopied("Dave"));
     expect_eq(sqnice::status::constraint, basic_status(cmd.try_execute()));
 }
 
@@ -38,8 +38,8 @@ TEST_CASE_METHOD(sqnice_test, "SQNice binder", "[sqnice]") {
 
 TEST_CASE_METHOD(sqnice_test, "SQNice bind 1", "[sqnice]") {
     sqnice::command cmd(db, "INSERT INTO contacts (name, phone) VALUES (?, ?)");
-    cmd.bind(1, "Mike", sqnice::nocopy);
-    cmd.bind(2, "555-1234", sqnice::nocopy);
+    cmd.bind(1, sqnice::uncopied("Mike"));
+    cmd.bind(2, sqnice::uncopied("555-1234"));
     cmd.execute();
 
     sqnice::query qry(db, "SELECT name, phone FROM contacts");
@@ -52,8 +52,8 @@ TEST_CASE_METHOD(sqnice_test, "SQNice bind 1", "[sqnice]") {
 
 TEST_CASE_METHOD(sqnice_test, "SQNice bind 2", "[sqnice]") {
     sqnice::command cmd(db, "INSERT INTO contacts (name, phone) VALUES (?100, ?101)");
-    cmd.bind(100, "Mike", sqnice::nocopy);
-    cmd.bind(101, "555-1234", sqnice::nocopy);
+    cmd.bind(100, sqnice::uncopied("Mike"));
+    cmd.bind(101, sqnice::uncopied("555-1234"));
     cmd.execute();
 
     sqnice::query qry(db, "SELECT name, phone FROM contacts");
@@ -66,8 +66,8 @@ TEST_CASE_METHOD(sqnice_test, "SQNice bind 2", "[sqnice]") {
 
 TEST_CASE_METHOD(sqnice_test, "SQNice bind 3", "[sqnice]") {
     sqnice::command cmd(db, "INSERT INTO contacts (name, phone) VALUES (:user, :phone)");
-    cmd.bind(":user", "Mike", sqnice::nocopy);
-    cmd.bind(":phone", "555-1234", sqnice::nocopy);
+    cmd.bind(":user", sqnice::uncopied("Mike"));
+    cmd.bind(":phone", sqnice::uncopied("555-1234"));
     cmd.execute();
 
     sqnice::query qry(db, "SELECT name, phone FROM contacts");
@@ -80,8 +80,8 @@ TEST_CASE_METHOD(sqnice_test, "SQNice bind 3", "[sqnice]") {
 
 TEST_CASE_METHOD(sqnice_test, "SQNice bind null", "[sqnice]") {
     sqnice::command cmd(db, "INSERT INTO contacts (name, phone, address) VALUES (:user, :phone, :address)");
-    cmd.bind(":user", "Mike", sqnice::nocopy);
-    cmd.bind(":phone", "555-1234", sqnice::nocopy);
+    cmd.bind(":user", sqnice::uncopied("Mike"));
+    cmd.bind(":phone", sqnice::uncopied("555-1234"));
     cmd.bind(":address", nullptr);
     cmd.execute();
 

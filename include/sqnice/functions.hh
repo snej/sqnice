@@ -96,14 +96,10 @@ namespace sqnice {
         void operator= (null_type) noexcept                      {*this = nullptr;}
         void operator= (arg_value const&) noexcept;
 
-        void operator= (char const* _Nullable value) noexcept    {set(value);}
-        void operator= (std::string_view value) noexcept         {set(value);}
-        void operator= (blob const&) noexcept;
-        void operator= (std::span<const std::byte> value) noexcept {set(value);}
-
-        void set(char const* _Nullable value, copy_semantic = copy) noexcept;
-        void set(std::string_view value, copy_semantic = copy) noexcept;
-        void set(std::span<const std::byte> value, copy_semantic = copy) noexcept;
+        void operator= (std::string_view) noexcept;
+        void operator= (uncopied_string) noexcept;
+        void operator= (blob v) noexcept                         {set_blob(v, true);}
+        void operator= (uncopied_blob v) noexcept                {set_blob(v, false);}
 
         template <resultable T>
         void operator= (T&& v) noexcept {
@@ -119,16 +115,17 @@ namespace sqnice {
         void set_subtype(unsigned) noexcept;
 
         /// Sets the result to an error.
-        void operator= (database_error const& x) noexcept        {set_error(x.what(), x.error_code);}
+        void operator= (database_error const& x) noexcept   {set_error(x.what(), x.error_code);}
         void set_error(std::string_view msg, status = status::error) noexcept;
 
     private:
         friend class context;
         explicit function_result(sqlite3_context* ctx) noexcept   :ctx_(ctx) { }
-        void set_int(int value) noexcept;
-        void set_int64(int64_t value) noexcept;
-        void set_uint64(uint64_t value) noexcept;
-        void set_double(double value) noexcept;
+        void set_int(int) noexcept;
+        void set_int64(int64_t) noexcept;
+        void set_uint64(uint64_t) noexcept;
+        void set_double(double) noexcept;
+        void set_blob(blob value, bool copy) noexcept;
 
         sqlite3_context* ctx_;
     };

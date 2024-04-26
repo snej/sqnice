@@ -12,8 +12,8 @@ TEST_CASE_METHOD(sqnice_test, "SQNice insert", "[sqnice]") {
 
         sqnice::command cmd(db, "INSERT INTO contacts (name, phone) VALUES (?, ?)");
 
-        cmd.bind(1, "BBBB", sqnice::copy);
-        cmd.bind(2, "1234", sqnice::copy);
+        cmd.bind(1, "BBBB");
+        cmd.bind(2, "1234");
         cmd.execute();
 
         cmd.reset();
@@ -121,8 +121,8 @@ TEST_CASE_METHOD(sqnice_test, "SQNice callbacks", "[sqnice]") {
 
         sqnice::command cmd(db, "INSERT INTO contacts (name, phone) VALUES (?, ?)");
 
-        cmd.bind(1, "BBBB", sqnice::copy);
-        cmd.bind(2, "1234", sqnice::copy);
+        cmd.bind(1, "BBBB");
+        cmd.bind(2, "1234");
         cmd.execute();
 
         cmd.reset();

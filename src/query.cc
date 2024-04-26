@@ -48,10 +48,6 @@ namespace sqnice {
 
     null_type ignore;
 
-    static sqlite3_destructor_type as_dtor(copy_semantic cs) {
-        return cs == copy ? SQLITE_TRANSIENT : SQLITE_STATIC;
-    }
-
 
 #pragma mark - STATEMENT:
 
@@ -245,26 +241,22 @@ namespace sqnice {
         return bind_int64(idx, int64_t(value));
     }
 
-    status statement::bind(int idx, char const* value, copy_semantic fcopy) {
-        return bind(idx, string_view(value), fcopy);
-    }
-
-    status statement::bind(int idx, string_view value, copy_semantic fcopy) {
+    status statement::bind(int idx, string_view value) {
         return check_bind(sqlite3_bind_text64(stmt(), idx, value.data(), value.size(),
-                                              as_dtor(fcopy), SQLITE_UTF8));
+                                              SQLITE_TRANSIENT, SQLITE_UTF8));
     }
 
-    status statement::bind(int idx, blob value) {
+    status statement::bind(int idx, uncopied_string value) {
+        return check_bind(sqlite3_bind_text64(stmt(), idx, value.data(), value.size(),
+                                              SQLITE_STATIC, SQLITE_UTF8));
+    }
+
+    status statement::bind_blob(int idx, blob value, bool copy) {
         if (value.data)
             return check_bind(sqlite3_bind_blob64(stmt(), idx, value.data, value.size,
-                                                  as_dtor(value.fcopy)));
+                                                  copy ? SQLITE_TRANSIENT : SQLITE_STATIC));
         else
             return check_bind(sqlite3_bind_zeroblob64(stmt(), idx, value.size));
-    }
-
-    status statement::bind(int idx, span<const byte> value, copy_semantic fcopy) {
-        return check_bind(sqlite3_bind_blob64(stmt(), idx, value.data(), value.size_bytes(),
-                                              as_dtor(fcopy) ));
     }
 
     status statement::bind_pointer(int idx, void* ptr, const char* type, pointer_destructor dtor) {
@@ -394,7 +386,7 @@ namespace sqnice {
         // so we get the size of the blob value, not the string value.
         auto data = sqlite3_column_blob(stmt_, idx_);
         auto size = sqlite3_column_bytes(stmt_, idx_);
-        return {data, size_t(size), copy};
+        return blob{data, size_t(size)};
     }
 
 

@@ -31,10 +31,6 @@
 namespace sqnice {
     using namespace std;
 
-    static inline sqlite3_destructor_type as_dtor(copy_semantic cs) {
-        return cs == copy ? SQLITE_TRANSIENT : SQLITE_STATIC;
-    }
-
     context::context(sqlite3_context* ctx, int nargs, database::argv_t values) noexcept
     : argc(nargs)
     , argv(nargs, values)
@@ -57,17 +53,18 @@ namespace sqnice {
         sqlite3_result_double(ctx_, value);
     }
 
-    void function_result::set(string_view value, copy_semantic fcopy) noexcept {
-        sqlite3_result_text64(ctx_, value.data(), value.size(), as_dtor(fcopy), SQLITE_UTF8);
+    void function_result::operator=(string_view value) noexcept {
+        sqlite3_result_text64(ctx_, value.data(), value.size(), SQLITE_TRANSIENT, SQLITE_UTF8);
     }
 
-    void function_result::set(char const* value, copy_semantic fcopy) noexcept {
-        set(string_view(value), fcopy);
+    void function_result::operator=(uncopied_string value) noexcept {
+        sqlite3_result_text64(ctx_, value.data(), value.size(), SQLITE_STATIC, SQLITE_UTF8);
     }
 
-    void function_result::operator= (blob const& value) noexcept {
+    void function_result::set_blob(blob value, bool copy) noexcept {
         if (value.data)
-            sqlite3_result_blob64(ctx_, value.data, value.size, as_dtor(value.fcopy));
+            sqlite3_result_blob64(ctx_, value.data, value.size,
+                                  copy ? SQLITE_TRANSIENT : SQLITE_STATIC);
         else
             sqlite3_result_zeroblob64(ctx_, value.size);
     }
@@ -153,7 +150,7 @@ namespace sqnice {
         // so we get the size of the blob value, not the string value.
         auto data = sqlite3_value_blob(value_);
         auto size = sqlite3_value_bytes(value_);
-        return {data, size_t(size), copy};
+        return {data, size_t(size)};
     }
 
 
