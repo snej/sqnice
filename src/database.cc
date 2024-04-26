@@ -152,7 +152,7 @@ namespace sqnice {
         queries_.reset();
 
         if (db_) {
-            if (db_.use_count() > 1)
+            if (immediately && db_.use_count() > 1)
                 return check(status::busy);
             set_db(nullptr);
         }
@@ -500,14 +500,17 @@ namespace sqnice {
         static log_handler sLogHandler;
 
         sLogHandler = std::move(h);
-        
-        auto callback = [](void* p, int errCode, const char* msg) noexcept {
-            if ( (errCode & 0xFF) == SQLITE_SCHEMA )
-                return;  // ignore harmless "statement aborts ... database schema has changed"
-            if (sLogHandler)
-                sLogHandler(status(errCode), msg);
-        };
-        sqlite3_config(SQLITE_CONFIG_LOG, h ? callback : nullptr, nullptr);
+        if (h) {
+            auto callback = [](void* p, int errCode, const char* msg) noexcept {
+                if ( (errCode & 0xFF) == SQLITE_SCHEMA )
+                    return;  // ignore harmless "statement aborts ... database schema has changed"
+                if (sLogHandler)
+                    sLogHandler(status(errCode), msg);
+            };
+            sqlite3_config(SQLITE_CONFIG_LOG, callback, nullptr);
+        } else {
+            sqlite3_config(SQLITE_CONFIG_LOG, nullptr, nullptr);
+        }
     }
 
     void database::set_busy_handler(busy_handler h) noexcept {

@@ -122,7 +122,7 @@ namespace sqnice {
         return sqlite3_value_int(value_);
     }
 
-    long long int arg_value::get_int64() const noexcept {
+    int64_t arg_value::get_int64() const noexcept {
         return sqlite3_value_int64(value_);
     }
 

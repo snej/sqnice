@@ -29,11 +29,17 @@
 
 #include <memory>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 
 #define SQNICE_VERSION "2.0.0"
 #define SQNICE_VERSION_MAJOR 2
 #define SQNICE_VERSION_MINOR 0
 #define SQNICE_VERSION_PATCH 0
+
+#ifndef __has_feature
+#  define __has_feature(F) 0
+#endif
 
 #if __has_feature(nullability)
 #  define ASSUME_NONNULL_BEGIN  _Pragma("clang assume_nonnull begin")

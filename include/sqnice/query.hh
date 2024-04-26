@@ -384,10 +384,6 @@ namespace sqnice {
         template <typename T>
         T single_value_or(T const& defaultResult);
 
-        // (Disabled because `reset` invalidates the pointers in the `blob`; use string instead.)
-        template <> std::optional<blob> single_value() = delete;
-        template <> blob single_value_or(blob const&) = delete;
-
     private:
         unsigned check_idx(unsigned idx) const;
     };
@@ -466,7 +462,7 @@ namespace sqnice {
                 return get_int64();
         }
 
-        template <std::unsigned_integral T>
+        template <std::unsigned_integral T> requires (!std::same_as<bool,T>)
         T get() const noexcept {
             // pin negative values to 0 instead of returning bogus huge numbers
             if constexpr (sizeof(T) < sizeof(int))
@@ -478,13 +474,15 @@ namespace sqnice {
         template<std::floating_point T>
         T get() const noexcept                          {return static_cast<T>(get_double());}
 
-        template<> bool get() const noexcept            {return get_int() != 0;}
-        template<> char const* get() const noexcept;
-        template<> std::string get() const noexcept   {return std::string(get<std::string_view>());}
-        template<> std::string_view get() const noexcept;
-        template<> void const* get() const noexcept;
-        template<> blob get() const noexcept;
-        template<> null_type get() const noexcept       {return ignore;}
+        template<std::same_as<bool> T> T get() const noexcept           {return get_int() != 0;}
+        template<std::same_as<const char*> T> T get() const noexcept;
+        template<std::same_as<std::string_view> T> T get() const noexcept;
+        template<std::same_as<std::string> T> T get() const noexcept {
+            return std::string(get<std::string_view>());
+        }
+        template<std::same_as<const void*> T> T get() const noexcept;
+        template<std::same_as<blob> T> T get() const noexcept;
+        template<std::same_as<null_type> T> T get() const noexcept      {return ignore;}
 
         template <columnable T> T get() const noexcept  {return column_helper<T>::get(*this);}
 
@@ -575,6 +573,16 @@ namespace sqnice {
             return defaultResult;
         }
     }
+
+    // (Disabled because `single_value` calls `reset`, which invalidates pointers.)
+    template <> std::optional<blob> query::single_value() = delete;
+    template <> std::optional<const char*> query::single_value() = delete;
+    template <> std::optional<const void*> query::single_value() = delete;
+    template <> std::optional<std::string_view> query::single_value() = delete;
+    template <> blob query::single_value_or(blob const&) = delete;
+    template <> const char* query::single_value_or(const char* _Nonnull const&) = delete;
+    template <> const void* query::single_value_or(const void* _Nonnull const&) = delete;
+    template <> std::string_view query::single_value_or(std::string_view const&) = delete;
 
     column_value query::row::column(unsigned idx) const {return column_value(*this,check_idx(idx));}
     column_value query::row::operator[] (unsigned idx) const   {return column(idx);}

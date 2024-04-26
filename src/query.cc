@@ -358,7 +358,7 @@ namespace sqnice {
         return sqlite3_column_int(stmt_, idx_);
     }
 
-    long long int column_value::get_int64() const noexcept {
+    int64_t column_value::get_int64() const noexcept {
         return sqlite3_column_int64(stmt_, idx_);
     }
 

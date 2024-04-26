@@ -30,6 +30,7 @@
 #include "sqnice/base.hh"
 #include <functional>
 #include <memory>
+#include <optional>
 
 ASSUME_NONNULL_BEGIN
 

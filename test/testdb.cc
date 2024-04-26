@@ -14,12 +14,13 @@ TEST_CASE_METHOD(sqnice_test, "SQNice insert", "[sqnice]") {
         sqnice::command cmd(db, "INSERT INTO contacts (name, phone) VALUES (?, ?)");
 
         cmd.bind(1, "BBBB");
-        cmd.bind(2, "1234");
+        cmd.bind(2, "555-1212");
         cmd.execute();
 
-        cmd.reset();
+        cmd.execute("CCCC", "555-1313");
 
-        cmd.binder() << "CCCC" << "1234";
+
+        cmd.binder() << "DD" << "555-1414";
 
         cmd.execute();
 

@@ -207,7 +207,7 @@ namespace sqnice {
                 return get_int64();
         }
 
-        template <std::unsigned_integral T>
+        template <std::unsigned_integral T> requires (!std::same_as<bool,T>)
         T get() const noexcept {
             // pin negative values to 0 instead of returning bogus huge numbers
             if constexpr (sizeof(T) < sizeof(int))
@@ -219,13 +219,15 @@ namespace sqnice {
         template<std::floating_point T>
         T get() const noexcept                          {return static_cast<T>(get_double());}
 
-        template<> bool get() const noexcept            {return get_int() != 0;}
-        template<> char const* get() const noexcept;
-        template<> std::string get() const noexcept   {return std::string(get<std::string_view>());}
-        template<> std::string_view get() const noexcept;
-        template<> void const* get() const noexcept;
-        template<> blob get() const noexcept;
-        template<> null_type get() const noexcept       {return ignore;}
+        template<std::same_as<bool> T> T get() const noexcept           {return get_int() != 0;}
+        template<std::same_as<const char*> T> T get() const noexcept;
+        template<std::same_as<std::string_view> T> T get() const noexcept;
+        template<std::same_as<std::string> T> T get() const noexcept {
+            return std::string(get<std::string_view>());
+        }
+        template<std::same_as<const void*> T> T get() const noexcept;
+        template<std::same_as<blob> T> T get() const noexcept;
+        template<std::same_as<null_type> T> T get() const noexcept      {return ignore;}
 
         template <columnable T> T get() const noexcept  {return column_helper<T>::get(*this);}
 
