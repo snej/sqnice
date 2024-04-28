@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.9)
 project( sqnice
     VERSION     0.1.0
     DESCRIPTION "A nice C++ API for SQLite"
-    LANGUAGES   CXX
+    LANGUAGES   CXX C
 )
 
 
@@ -13,12 +13,16 @@ set(CMAKE_C_STANDARD            11)
 set(CMAKE_C_STANDARD_REQUIRED   ON)
 
 
+option(USE_LOCAL_SQLITE "Use copy of sqlite in the vendor subdirectory" OFF)
+
+
 #### CONFIG
 
 
 if (MSVC)
     # MSVC:
     add_definitions(-DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0A00 -DNOMINMAX)
+    set(USE_LOCAL_SQLITE ON) #FIXME: Don't override the option
 else()
     # Clang & GCC:
     add_compile_options(
@@ -47,6 +51,12 @@ else()
 endif()
 
 
+if (USE_LOCAL_SQLITE)
+    include_directories( BEFORE SYSTEM
+        vendor/sqlite/
+    )
+endif()
+
 add_library( sqnice STATIC
     src/base.cc
     src/blob_stream.cc
@@ -60,9 +70,16 @@ target_include_directories( sqnice PUBLIC
     include/
 )
 
-target_link_libraries( sqnice INTERFACE
-    sqlite3
-)
+if (USE_LOCAL_SQLITE)
+    target_sources( sqnice PRIVATE
+        vendor/sqlite/sqlite3.c
+    )
+else()
+    target_link_libraries( sqnice INTERFACE
+        sqlite3
+    )
+endif()
+
 
 #### TESTS
 

@@ -64,7 +64,7 @@ namespace sqnice {
     static_assert(int(open_flags::nomutex)      == SQLITE_OPEN_NOMUTEX);
     static_assert(int(open_flags::fullmutex)    == SQLITE_OPEN_FULLMUTEX);
     static_assert(int(open_flags::nofollow)     == SQLITE_OPEN_NOFOLLOW);
-#ifdef __APPLE__
+#ifdef SQLITE_OPEN_FILEPROTECTION_COMPLETE // only in Apple's system copy of sqlite3.h
     static_assert(int(open_flags::fileprotection_complete)
                   == SQLITE_OPEN_FILEPROTECTION_COMPLETE);
     static_assert(int(open_flags::fileprotection_complete_unless_open)
