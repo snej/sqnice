@@ -395,12 +395,10 @@ namespace sqnice {
 
     query::iterator::iterator(query* query)
     : impl_(query->give_impl(this))
-    , rc_ {sqlite3_step(impl_->stmt)}
     , cur_row_(impl_->stmt)
+    , exceptions_(query->exceptions())
     {
-        assert(impl_->owned_by(this));
-        if (rc_ != status::row && rc_ != status::done)
-            query->raise(rc_);
+        ++(*this); // go to 1st row
     }
 
     query::iterator::~iterator() noexcept {
@@ -410,13 +408,21 @@ namespace sqnice {
 
     query::iterator& query::iterator::operator++() {
         assert(impl_->owned_by(this));
-        rc_ = status{sqlite3_step(impl_->stmt)};
-        if (rc_ == status::done) {
-            sqlite3_reset(impl_->stmt);
-            impl_->transfer_owner(this, nullptr); // done with the statement now
-        } else if (rc_ != status::row && rc_ != status::ok) {
-            const char* msg = sqlite3_errmsg(sqlite3_db_handle(impl_->stmt));
-            checking::raise(rc_, msg);
+        switch (rc_ = status{sqlite3_step(impl_->stmt)}) {
+            case status::row:
+            case status::ok:
+                break;
+            case status::done:
+                cur_row_.clear();
+                sqlite3_reset(impl_->stmt);
+                impl_->transfer_owner(this, nullptr); // return sqlite3_stmt to query
+                break;
+            default:
+                cur_row_.clear();
+                if (exceptions_) {
+                    const char* msg = sqlite3_errmsg(sqlite3_db_handle(impl_->stmt));
+                    checking::raise(rc_, msg);
+                }
         }
         return *this;
     }

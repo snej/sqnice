@@ -367,12 +367,12 @@ namespace sqnice {
         char const* column_decltype(unsigned idx) const;
 
         class iterator;
-        class row;
+        struct end_iterator { inline bool operator== (iterator const&) const; };
 
         /// Runs the query and returns an iterator pointing to the first result row.
         [[nodiscard]] inline iterator begin();
         /// An empty iterator representing the end of the rows.
-        [[nodiscard]] inline iterator end() noexcept;
+        [[nodiscard]] inline end_iterator end() const noexcept    {return end_iterator{};}
 
         /// A convenience method that runs the query and returns the value of the first row's
         /// first column. If there are no rows, returns `std::nullopt`.
@@ -383,6 +383,8 @@ namespace sqnice {
         /// first column. If there are no rows, returns `defaultResult` instead.
         template <typename T>
         T single_value_or(T const& defaultResult);
+
+        class row;
 
     private:
         unsigned check_idx(unsigned idx) const;
@@ -414,8 +416,8 @@ namespace sqnice {
         friend class query::iterator;
         friend class column_value;
 
-        row() = default;
         explicit row(sqlite3_stmt* stmt) noexcept       :stmt_(stmt) { }
+        void clear()                                    {stmt_ = nullptr;}
 
     private:
         unsigned check_idx(unsigned idx) const;
@@ -522,15 +524,21 @@ namespace sqnice {
     /** Typical C++ iterator over a query's result rows. */
     class query::iterator {
     public:
+        /// Returns the current row.
         const row& operator*() const noexcept           {return cur_row_;}
         const row* operator->() const noexcept          {return &cur_row_;}
 
-        bool operator==(iterator const& other) const noexcept    {return rc_ == other.rc_;}
-
+        /// Moves the iterator to the next row.
         iterator& operator++();
 
         /// True if the iterator is valid; false if it's at the end.
-        explicit operator bool() const noexcept         {return rc_ != status::done;}
+        explicit operator bool() const noexcept         {return rc_ == status::row;}
+
+        /// The iterator's status. Will be `row` when a row is available, `done` when finished,
+        /// or a different status if an error occurs.
+        /// If you've turned off exceptions on the parent `query`, you should test this after
+        /// the iterator ends, to detect possible errors.
+        status last_status() const                      {return rc_;}
 
         /// A convenience for accessing a column of the current row.
         column_value operator[] (unsigned idx) const    {return cur_row_[idx];}
@@ -545,12 +553,12 @@ namespace sqnice {
 
     private:
         friend class query;
-        iterator() = default;
         explicit iterator(query*);
 
         std::shared_ptr<statement::impl> impl_;
-        status              rc_     {status::done};
-        row                 cur_row_;
+        status                           rc_;
+        row                              cur_row_;
+        bool                             exceptions_;
     };
 
 
@@ -589,8 +597,10 @@ namespace sqnice {
     template <class T> T query::row::get(unsigned idx) const   {return column(idx).get<T>();}
 
     query::iterator query::begin()                      {return iterator(this);}
-    query::iterator query::end() noexcept               {return iterator();}
 
+    bool query::end_iterator::operator== (query::iterator const& i) const {
+        return !i;
+    }
 }
 
 ASSUME_NONNULL_END

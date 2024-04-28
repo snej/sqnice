@@ -82,7 +82,7 @@ namespace sqnice {
         /// @param dst  The destination address to copy data to.
         /// @param len  The number of bytes to read.
         /// @param offset  The offset in the blob to start reading at.
-        /// @returns  The number of bytes actually read, or -1 on error; check `status()`.
+        /// @returns  The number of bytes actually read, or -1 on error; check `last_status()`.
         /// @throws database_error  on error if exceptions are enabled.
         [[nodiscard]] int pread(void *dst, size_t len, uint64_t offset) const;
 
@@ -92,7 +92,7 @@ namespace sqnice {
         /// @param src  The address of the data to write.
         /// @param len  The number of bytes to write.
         /// @param offset  The offset in the blob to start writing at.
-        /// @returns  The number of bytes actually written, or -1 on error; check `status()`.
+        /// @returns  The number of bytes actually written, or -1 on error; check `last_status()`.
         /// @throws database_error  on error if exceptions are enabled.
         [[nodiscard]] int pwrite(const void *src, size_t len, uint64_t offset);
 
