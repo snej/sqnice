@@ -89,7 +89,10 @@ namespace sqnice {
         return *this;
     }
 
-    database::~database() noexcept = default;
+    database::~database() noexcept {
+        if (db_)
+            tear_down();
+    }
 
     status database::open(string_view dbname_, open_flags flags, char const* vfs) {
         close();
@@ -148,15 +151,23 @@ namespace sqnice {
     }
 
     status database::close(bool immediately) {
-        commands_.reset();
-        queries_.reset();
-
         if (db_) {
             if (immediately && db_.use_count() > 1)
                 return check(status::busy);
+            tear_down();
             set_db(nullptr);
         }
         return status::ok;
+    }
+
+    void database::tear_down() noexcept {
+        commands_.reset();
+        queries_.reset();
+        set_busy_handler(nullptr);
+        set_commit_handler(nullptr);
+        set_rollback_handler(nullptr);
+        set_update_handler(nullptr);
+        set_authorize_handler(nullptr);
     }
 
     sqlite3* database::check_handle() const {
@@ -497,15 +508,22 @@ namespace sqnice {
 
 
     void database::set_log_handler(log_handler h) noexcept {
+        static mutex sLogMutex;
         static log_handler sLogHandler;
 
+        lock_guard lock(sLogMutex);
         sLogHandler = std::move(h);
         if (h) {
             auto callback = [](void* p, int errCode, const char* msg) noexcept {
-                if ( (errCode & 0xFF) == SQLITE_SCHEMA )
-                    return;  // ignore harmless "statement aborts ... database schema has changed"
+                if ( (errCode & 0xFF) == SQLITE_SCHEMA ) {
+                    // ignore noisy and harmless "statement aborts ...database schema has changed"
+                    // warning when a sqlite_stmt is executed after a schema change. SQLite
+                    // automatically recompiles the statement, so this is not an error.
+                    return;
+                }
+                lock_guard lock(sLogMutex);
                 if (sLogHandler)
-                    sLogHandler(status(errCode), msg);
+                    sLogHandler(status{errCode}, msg);
             };
             sqlite3_config(SQLITE_CONFIG_LOG, callback, nullptr);
         } else {

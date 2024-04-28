@@ -112,6 +112,10 @@ namespace sqnice {
     };
 
 
+    using db_handle   = std::shared_ptr<sqlite3>;
+    using db_weak_ref = std::weak_ptr<sqlite3>;
+
+
     /** A base class that handles exceptions by throwing or returning an error code.
         Most of the other classes derive from this. */
     class checking {
@@ -142,11 +146,11 @@ namespace sqnice {
         explicit checking(bool x)                       :exceptions_(x) { }
         status check(int rc) const                      {return check(status{rc});}
 
-        std::shared_ptr<sqlite3> get_db() const noexcept {return weak_db_.lock();}
-        std::shared_ptr<sqlite3> check_get_db() const;
+        db_handle get_db() const noexcept               {return weak_db_.lock();}
+        db_handle check_get_db() const;
 
-        std::weak_ptr<sqlite3> weak_db_;
-        bool                   exceptions_;
+        db_weak_ref weak_db_;
+        bool        exceptions_;
     };
 
 }

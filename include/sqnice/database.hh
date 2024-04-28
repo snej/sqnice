@@ -95,10 +95,6 @@ namespace sqnice {
         return function_flags(int(a) | int(b));}
 
 
-    using db_handle = std::shared_ptr<sqlite3>;
-    using db_weak_ref = std::weak_ptr<sqlite3>;
-
-
     /** A SQLite database connection. */
     class database : public checking, noncopyable {
     public:
@@ -405,10 +401,11 @@ namespace sqnice {
         friend class checking;
         friend class statement;
 
-        void set_db(std::shared_ptr<sqlite3> db) {
+        void set_db(db_handle db) {
             db_ = std::move(db);
             weak_db_ = db_;
         }
+        void tear_down() noexcept;
 
         // internal gunk used by create_function and create_aggregate.
         // Implementations in functions.hh.
@@ -433,7 +430,6 @@ namespace sqnice {
         std::unique_ptr<database_error> posthumous_error_;
         std::unique_ptr<statement_cache<sqnice::command>> commands_;
         std::unique_ptr<statement_cache<sqnice::query>> queries_;
-        log_handler         lh_;
         busy_handler        bh_;
         commit_handler      ch_;
         rollback_handler    rh_;
