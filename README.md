@@ -28,11 +28,13 @@ With **SQNice** I've tried to take advantage of my learning and bake it into the
 
 ## Building It
 
-A C++20 compiler is required. So far it has only been tested with Clang.
+A C++20 compiler is required. So far SQNice has been tested with Clang on macOS and GCC on Linux.
 
 There is a CMake build script, so if your build system is CMake too, you can simply use an `add_subdirectory` call to add sqnice.
 
 Otherwise, just add the source files in `src/` to your project, and add `include/` to your header search path.
+
+Oh, you'll need SQLite, too. It's pre-installed on Apple platforms. Otherwise you can install it with your favorite package manager, or just download it from [sqlite.org](https://sqlite.org/download.html).
 
 ## Using It
 
@@ -141,3 +143,17 @@ In SQNice, the lowest-level way to use transactions is by calling `db.beginTrans
 Usually you’ll use the `transaction` class. The constructor begins the transaction, and the destructor makes sure to abort it if you didn’t already explicitly commit or abort. That means you can `return` or `break` out of a block containing a `transaction`, or even throw an exception, and everything is cleaned up for you. But you _do_ have to remember to call `txn.commit()` at the end, before it exits scope.
 
 (There is an auto-commit mode for transactions, where it calls `commit` for you in the destructor, but it’s discouraged because a commit might fail but destructors shouldn’t throw exceptions.)
+
+### Thread Safety
+
+> **IMPORTANT:** SQNice's code is **not** thread-safe. You MUST NOT access a `database`, nor any objects created from it such as `command`, `query`, etc., simultaneously from multiple threads.
+
+SQLite itself has some limited thread-safety (depending on how you set its mutex mode), but it is not very useful in practice. Interleaving SQL statements from multiple threads doing different tasks may not crash, but unless all those statements are read-only, you're likely to get race conditions at the database level. (Worse, using a single compiled statement simultaneously can result in a mishmash of bindings and result rows.) Transactions will not help! A transaction prevents other _connections_ from altering the database, not other threads accessing the _same_ connection.
+
+Some ways to use SQNice on multiple threads:
+
+1. Open one `database`, associate your own `mutex` with it, and make sure each thread locks the mutex while accessing the `database` or while using any `command` or `query` or `transaction` objects.
+2. Open one `database` on each thread (on the same file), and make sure each thread uses only its database and derived objects. A thread-local variable can be useful for this.
+3. Create a pool of `database` instances on the same file. When a thread wants to use a database it checks one out of the pool, and then returns it after it's done.
+
+At some point I'd like to implement #3 as a utility class for SQNice.
