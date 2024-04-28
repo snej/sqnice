@@ -28,13 +28,12 @@
 #define SQNICE_QUERY_H
 
 #include "sqnice/base.hh"
+#include <algorithm>
 #include <concepts>
 #include <cstddef>
 #include <iterator>
 #include <optional>
 #include <span>
-#include <string>
-#include <string_view>
 #include <cassert>
 
 ASSUME_NONNULL_BEGIN

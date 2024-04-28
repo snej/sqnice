@@ -29,7 +29,9 @@
 
 #include "sqnice/database.hh"
 #include "sqnice/query.hh"
+#include <algorithm>
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <tuple>
 #include <type_traits>

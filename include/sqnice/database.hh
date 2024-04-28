@@ -29,8 +29,8 @@
 
 #include "sqnice/base.hh"
 #include <functional>
-#include <memory>
 #include <optional>
+#include <tuple>
 
 ASSUME_NONNULL_BEGIN
 

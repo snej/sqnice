@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cassert>
+#include <mutex>
 
 #ifdef SQNICE_LOADABLE_EXTENSION
 #  include <sqlite3ext.h>
