@@ -76,4 +76,10 @@ jobs:
 
     - name: Test
       working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      run: ./sqnice_tests
+      if: runner.os != 'Windows'
+      run: sqnice_tests
+
+    - name: Test
+      working-directory: ${{ steps.strings.outputs.build-output-dir }}
+      if: runner.os == 'Windows'
+      run: sqnice_tests.exe
