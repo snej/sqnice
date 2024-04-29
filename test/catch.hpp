@@ -7971,7 +7971,7 @@ namespace Catch {
 #ifndef CATCH_BREAK_INTO_DEBUGGER
     #ifdef CATCH_TRAP
         //#define CATCH_BREAK_INTO_DEBUGGER() []{ if( Catch::isDebuggerActive() ) { CATCH_TRAP(); } }()
-        #define CATCH_BREAK_INTO_DEBUGGER() ({if( Catch::isDebuggerActive() ) { CATCH_TRAP(); } })
+        #define CATCH_BREAK_INTO_DEBUGGER() do {if( Catch::isDebuggerActive() ) { CATCH_TRAP(); } } while(0)
     #else
         #define CATCH_BREAK_INTO_DEBUGGER() []{}()
     #endif
@@ -8252,7 +8252,12 @@ namespace Catch {
         return getCurrentContext().getConfig()->allowThrows();
     }
 
-    __attribute__((nodebug)) void AssertionHandler::complete() {
+#ifdef __has_attribute
+#  if __has_attribute(nodebug)
+    __attribute__((nodebug)) // keeps the debugger from showing this stack frame
+#  endif
+#endif
+    void AssertionHandler::complete() {
         setCompleted();
         if( m_reaction.shouldDebugBreak ) {
 
