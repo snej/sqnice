@@ -261,7 +261,7 @@ namespace sqnice {
         /// Returns a `query` object that will run the given SQL statement.
         /// @note This object comes from an internal `command_cache`, so subsequent calls with the
         ///       same SQL string will use the precompiled statement instead of compiling it again.
-        [[nodiscard]] sqnice::query query(std::string_view sql);
+        [[nodiscard]] sqnice::query query(std::string_view sql) const;
 
         /// Low-level transaction support: begins a transaction.
         /// Transactions can nest; nested transactions are implemented as savepoints.
@@ -429,7 +429,7 @@ namespace sqnice {
         bool                temporary_ = false;
         std::unique_ptr<database_error> posthumous_error_;
         std::unique_ptr<statement_cache<sqnice::command>> commands_;
-        std::unique_ptr<statement_cache<sqnice::query>> queries_;
+        std::unique_ptr<statement_cache<sqnice::query>> mutable queries_;
         busy_handler        bh_;
         commit_handler      ch_;
         rollback_handler    rh_;

@@ -200,9 +200,9 @@ namespace sqnice {
         return commands_->compile(string(sql));
     }
 
-    query database::query(string_view sql) {
+    query database::query(string_view sql) const {
         if (!queries_)
-            queries_ = make_unique<query_cache>(*this);
+            queries_ = make_unique<query_cache>(const_cast<database&>(*this));
         return queries_->compile(string(sql));
     }
 

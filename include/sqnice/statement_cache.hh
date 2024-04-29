@@ -60,7 +60,7 @@ namespace sqnice {
             } else {
                 auto x = stmts_.emplace(std::piecewise_construct,
                                         std::tuple<std::string>{sql},
-                                        std::tuple<checking&,const char*,statement::persistence>{
+                                        std::tuple<statement_cache<STMT>&,const char*,statement::persistence>{
                                                 *this, sql.c_str(), statement::persistent});
                 stmt = &x.first->second;
             }

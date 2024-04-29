@@ -27,6 +27,7 @@
 #include "sqnice/query.hh"
 #include "sqnice/database.hh"
 #include "sqnice/functions.hh"
+#include "sqnice/statement_cache.hh"
 #include <cassert>
 
 #ifdef SQNICE_LOADABLE_EXTENSION
@@ -57,13 +58,13 @@ namespace sqnice {
     }
 
 
-    statement::statement(checking& ck, shared_ptr<impl> impl) noexcept
+    statement::statement(checking const& ck, shared_ptr<impl> impl) noexcept
     :checking(ck),
     impl_(std::move(impl))
     { }
 
 
-    statement::statement(checking& ck, string_view stmt, persistence persistence)
+    statement::statement(checking const& ck, string_view stmt, persistence persistence)
     :statement(ck)
     {
         exceptions_ = true;
@@ -285,6 +286,12 @@ namespace sqnice {
 
 #pragma mark - COMMAND:
 
+
+    command::command(database& db, std::string_view sql, persistence p)
+    :statement(db, sql, p) { }
+
+    command::command(statement_cache<command>& sc, std::string_view sql, persistence p)
+    :statement(sc, sql, p) { }
 
     status command::try_execute() noexcept {
         auto db = check_get_db();

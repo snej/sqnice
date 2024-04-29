@@ -28,11 +28,13 @@
 #define SQNICE_TRANSACTION_H
 
 #include "sqnice/base.hh"
+#include <optional>
 
 ASSUME_NONNULL_BEGIN
 
 namespace sqnice {
     class database;
+    class pool;
 
     /** An RAII wrapper around SQLite's transactions and savepoints. */
     class transaction : noncopyable {
@@ -59,17 +61,29 @@ namespace sqnice {
         explicit transaction(database& db,
                              bool immediate = true,
                              bool autocommit = false);
-        transaction(transaction&&) noexcept;
-        ~transaction() noexcept;
+
+        /// Begins a transaction, using a writeable database checked out from a `pool`.
+        explicit transaction(pool&,
+                             bool immediate = true,
+                             bool autocommit = false);
 
         /// Constructs a `transaction` but does not begin it yet. Call `begin` next.
-        transaction() = default;
+        transaction();
+
+        transaction(transaction&&) noexcept;
+        ~transaction();
 
         /// The transaction's database. Throws if the transaction isn't active.
         database& active_database() const;
 
         /// Begins a transaction. For use with the no-arguments constructor.
         status begin(database& db,
+                     bool immediate = true,
+                     bool autocommit = false);
+
+        /// Begins a transaction, using a writeable database checked out from a `pool`.
+        /// For use with the no-arguments constructor.
+        status begin(pool&,
                      bool immediate = true,
                      bool autocommit = false);
 
@@ -84,8 +98,9 @@ namespace sqnice {
     private:
         status end(bool commit);
 
-        database* _Nullable db_ = nullptr;
-        bool                autocommit_ = false;
+        std::optional<std::unique_ptr<database, pool&>> borrowed_db_;
+        database* _Nullable                             db_ = nullptr;
+        bool                                            autocommit_ = false;
     };
 
 }

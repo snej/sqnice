@@ -26,6 +26,7 @@
 
 #include "sqnice/transaction.hh"
 #include "sqnice/database.hh"
+#include "sqnice/pool.hh"
 #include <exception>
 
 #ifdef SQNICE_LOADABLE_EXTENSION
@@ -38,15 +39,26 @@ SQLITE_EXTENSION_INIT1
 namespace sqnice {
     using namespace std;
 
+    transaction::transaction() = default;
+
     transaction::transaction(database& db, bool autocommit, bool immediate) {
         status rc = begin(db, autocommit, immediate);
         if (!ok(rc)) [[unlikely]]
             db.raise(rc);  // always throw -- constructor cannot return a status
     }
 
+    transaction::transaction(pool& pool, bool autocommit, bool immediate)
+    :borrowed_db_(pool.borrow_writeable())
+    {
+        status rc = begin(*borrowed_db_->get(), autocommit, immediate);
+        if (!ok(rc)) [[unlikely]]
+            (*borrowed_db_)->raise(rc);  // always throw -- constructor cannot return a status
+    }
+
     transaction::transaction(transaction &&t) noexcept
-    : db_(t.db_)
-    , autocommit_(t.autocommit_)
+    :borrowed_db_(std::move(t.borrowed_db_))
+    ,db_(t.db_)
+    ,autocommit_(t.autocommit_)
     {
         t.db_ = nullptr;
     }
@@ -62,7 +74,15 @@ namespace sqnice {
         return rc;
     }
 
-    transaction::~transaction() noexcept {
+    status transaction::begin(pool& pool, bool autocommit, bool immediate) {
+        auto db = pool.borrow_writeable();
+        status rc = begin(*db, autocommit, immediate);
+        if (ok(rc))
+            borrowed_db_.emplace(std::move(db));
+        return rc;
+    }
+
+    transaction::~transaction() {
         if (db_) {
             if (autocommit_ && !current_exception()) {
                 // It is legal (though discouraged) to throw an exception from a destructor,

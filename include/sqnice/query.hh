@@ -45,6 +45,7 @@ namespace sqnice {
     class database;
     class statement;
     class column_value;
+    template <class STMT> class statement_cache;
 
     /** SQLite's data types. (Values are equal to SQLITE_INT, etc.) */
     enum class data_type : int {
@@ -238,9 +239,9 @@ namespace sqnice {
             const void* _Nullable owner_ = nullptr;
         };
 
-        explicit statement(checking& ck) noexcept       :checking(ck) { }
-        explicit statement(checking&, std::shared_ptr<impl> impl) noexcept;
-        statement(checking&, std::string_view sql, persistence);
+        explicit statement(checking const& ck) noexcept       :checking(ck) { }
+        explicit statement(checking const&, std::shared_ptr<impl> impl) noexcept;
+        statement(checking const&, std::string_view sql, persistence);
         ~statement() noexcept;
 
         std::shared_ptr<impl> give_impl(const void* _Nullable newOwner = nullptr);
@@ -301,8 +302,8 @@ namespace sqnice {
     public:
         /// Creates a command, compiling the SQL string.
         /// @throws database_error if the SQL is invalid.
-        command(checking& ck, std::string_view sql, persistence = nonpersistent)
-            :statement(ck, sql, persistent) { }
+        command(database& ck, std::string_view sql, persistence = nonpersistent);
+        command(statement_cache<command>&, std::string_view sql, persistence = nonpersistent);
 
         /// Executes the statement.
         /// @note  To get the rowid of an INSERT, call `last_insert_rowid`.
@@ -342,7 +343,7 @@ namespace sqnice {
     public:
         /// Creates a command, compiling the SQL string.
         /// @throws database_error if the SQL is invalid.
-        query(checking& db, std::string_view sql, persistence = nonpersistent)
+        query(checking const& db, std::string_view sql, persistence = nonpersistent)
             :statement(db, sql, persistent) { }
 
         /// Binds its arguments to multiple query parameters starting at index 1.
