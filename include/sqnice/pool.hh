@@ -28,6 +28,7 @@
 #define SQNICE_POOL_H
 
 #include "sqnice/database.hh"
+#include <condition_variable>
 #include <functional>
 #include <mutex>
 #include <stack>
@@ -113,17 +114,20 @@ namespace sqnice {
         /// (The pool can still re-open more databases on demand, up to its capacity.)
         void close_unused();
 
+#ifndef __GNUC__
     private:
         friend borrowed_database;
         friend borrowed_writeable_database;
+#endif
+        void operator() (database* _Nullable) noexcept;       // deleter
+        void operator() (database const* _Nullable) noexcept; // deleter
 
+    private:
         pool(pool&&) = delete;
         pool& operator=(pool&&) = delete;
         borrowed_database borrow(bool);
         borrowed_writeable_database borrow_writeable(bool);
         std::unique_ptr<database> new_db(bool writeable);
-        void operator() (database* _Nullable) noexcept;       // deleter
-        void operator() (database const* _Nullable) noexcept; // deleter
 
         using db_ptr = std::unique_ptr<const database>;
 

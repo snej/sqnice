@@ -151,7 +151,7 @@ TEST_CASE_METHOD(sqnice_test, "SQNice callbacks", "[sqnice]") {
 }
 
 TEST_CASE("SQNice pool", "[sqnice]") {
-    sqnice::pool p("/tmp/sqnice_test.sqlite3",
+    sqnice::pool p("sqnice_test.sqlite3",
                    sqnice::open_flags::delete_first | sqnice::open_flags::readwrite);
     {
         auto db = p.borrow_writeable();
