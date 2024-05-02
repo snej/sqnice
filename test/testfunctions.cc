@@ -160,7 +160,13 @@ TEST_CASE_METHOD(sqnice_test, "SQNice aggregate", "[sqnice]") {
 
 TEST_CASE("SQNice aggregate functions", "[.sqnice]") {
     //FIXME: Needs a pre-populated database
-    sqnice::database db("foods.db", sqnice::open_flags::readonly);
+    sqnice::database db;
+    db.exceptions(false);
+    auto rc = db.open("foods.db", sqnice::open_flags::readonly);
+    if (rc == sqnice::status::cantopen)
+        return;
+    REQUIRE(rc == sqnice::status::ok);
+    db.exceptions(true);
 
     db.create_aggregate<mysum<string>, string>("a2");
     db.create_aggregate<mysum<int>, int>("a3");

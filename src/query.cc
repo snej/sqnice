@@ -27,7 +27,7 @@
 #include "sqnice/query.hh"
 #include "sqnice/database.hh"
 #include "sqnice/functions.hh"
-#include "sqnice/statement_cache.hh"
+#include "statement_cache.hh"
 #include <cassert>
 
 #ifdef SQNICE_LOADABLE_EXTENSION

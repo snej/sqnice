@@ -56,7 +56,6 @@ namespace sqnice {
     static_assert(int(status::done)             == SQLITE_DONE);
     static_assert(int(status::row)              == SQLITE_ROW);
 
-    static_assert(int(open_flags::readonly)     == SQLITE_OPEN_READONLY);
     static_assert(int(open_flags::readwrite)    == SQLITE_OPEN_READWRITE);
     static_assert(int(open_flags::create)       == SQLITE_OPEN_CREATE);
     static_assert(int(open_flags::uri)          == SQLITE_OPEN_URI);

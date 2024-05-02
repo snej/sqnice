@@ -26,10 +26,11 @@
 
 #include "sqnice/database.hh"
 #include "sqnice/query.hh"
-#include "sqnice/statement_cache.hh"
+#include "statement_cache.hh"
 #include <cstdio>
 #include <cstring>
 #include <cassert>
+#include <filesystem>
 #include <mutex>
 
 #ifdef SQNICE_LOADABLE_EXTENSION
@@ -95,37 +96,74 @@ namespace sqnice {
             tear_down();
     }
 
+
+    // deleter function for `shared_ptr<sqlite3>`:
+    static void db_deleter(sqlite3* db) {
+        auto rc = status{sqlite3_close(db)};
+        if (rc == status::busy) {
+            fprintf(stderr, "**SQLITE WARNING**: A `sqnice::database` object at %p"
+                    "is being destructed while there are still open query iterators, blob"
+                    " streams or backups. This is bad! (For more information, read the docs for"
+                    "`sqnice::database::close`.)\n", (void*)db);
+            sqlite3_db_config(db, SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, 1, nullptr);
+            (void)sqlite3_close_v2(db);
+        }
+    };
+
+
+    open_flags normalize(open_flags flags) {
+        using enum open_flags;
+        if (!!(flags & memory))
+            flags |= temporary;                 // memory implies temporary
+        if (!!(flags & temporary)) {
+            flags |= readwrite | create;        // temporary implies readwrite and create
+            flags = flags - delete_first;       // ...but ignore delete_first
+        } else if (!!(flags & delete_first)) {
+            if (!(flags & readwrite))           // delete_first requires readwrite
+                throw invalid_argument("using flag delete_first requires readwrite");
+            flags |= create;                    // delete_first implies create
+        }
+        if (!!(flags & create) && !(flags & readwrite))
+            throw invalid_argument("flag create requires flag readwrite");
+        return flags;
+    }
+
+
     status database::open(string_view dbname_, open_flags flags, char const* vfs) {
         close();
 
-        if (!!(flags & open_flags::memory) && !(flags & (open_flags::readwrite | open_flags::readonly)))
-            flags |= open_flags::readwrite;
+        flags = normalize(flags);
+        bool temporary = !!(flags & open_flags::temporary);
+        string dbname;
+        // "If the filename is an empty string, then a private, temporary on-disk database will
+        // be created [and] automatically deleted as soon as the database connection is closed."
+        if (!temporary) {
+            if (dbname_.empty())
+                throw invalid_argument("empty filename is not allowed for non-temporary database");
+            dbname = dbname_;
 
-        string dbname(dbname_);
-        // "It is recommended that when a database filename actually does begin with a ":" character
-        // you should prefix the filename with a pathname such as "./" to avoid ambiguity."
-        if (dbname.starts_with(":") && dbname != ":memory:" && !(flags & open_flags::uri))
-            dbname = "./" + dbname; //FIXME: Is this OK on Windows?
+            // "It is recommended that when a database filename actually does begin with a ":"
+            // character you should prefix the filename with a pathname such as "./" to avoid
+            // ambiguity."
+            if (dbname.starts_with(":") && !(flags & open_flags::uri))
+                dbname = "./" + dbname; //FIXME: Is this OK on Windows?
+        }
+
+        if (!!(flags & open_flags::delete_first)) {
+            if (auto rc = delete_file(dbname, exceptions()); !ok(rc) && rc != status::cantopen)
+                return rc;
+            flags = (flags - open_flags::delete_first); // don't pass nonstandard flag to SQLite
+        }
+
+        int intflags = int(flags) | SQLITE_OPEN_EXRESCODE;
+        if (!(intflags & SQLITE_OPEN_READWRITE))
+            intflags |= SQLITE_OPEN_READONLY;
 
         sqlite3* db = nullptr;
-        auto rc = status{sqlite3_open_v2(dbname.c_str(), &db,
-                                         int(flags) | SQLITE_OPEN_EXRESCODE,
-                                         vfs)};
+        auto rc = status{sqlite3_open_v2(dbname.c_str(), &db, intflags, vfs)};
         if (ok(rc)) {
-            // deleter function for the shared_ptr:
-            auto close_db = [](sqlite3* db) {
-                auto rc = status{sqlite3_close(db)};
-                if (rc == status::busy) {
-                    fprintf(stderr, "**SQLITE WARNING**: A `sqnice::database` object at %p"
-                            "is being destructed while there are still open query iterators, blob"
-                            " streams or backups. This is bad! (For more information, read the docs for"
-                            "`sqnice::database::close`.)\n", (void*)db);
-                    sqlite3_db_config(db, SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, 1, nullptr);
-                    (void)sqlite3_close_v2(db);
-                }
-            };
-            set_db(shared_ptr<sqlite3>(db, close_db));
-            temporary_ = !!(flags & open_flags::memory) || dbname.empty() || dbname == ":memory:";
+            set_db(shared_ptr<sqlite3>(db, db_deleter));
+            temporary_ = temporary;
             posthumous_error_ = nullptr;
 
         } else {
@@ -140,18 +178,15 @@ namespace sqnice {
     }
 
     status database::open_temporary(bool on_disk) {
-        // "If the filename is an empty string, then a private, temporary on-disk database will
-        // be created [and] automatically deleted as soon as the database connection is closed."
-        string_view name;
-        open_flags flags = open_flags::readwrite;
-        if (!on_disk) {
-            name = "temporary";
+        open_flags flags = open_flags::defaults | open_flags::temporary;
+        if (!on_disk)
             flags |= open_flags::memory;
-        }
-        return open(name, flags);
+        return open("temporary", flags);
     }
 
     status database::close(bool immediately) {
+        if (borrowed_)
+            throw logic_error("cannot close database borrowed from a pool");
         if (db_) {
             if (immediately && db_.use_count() > 1)
                 return check(status::busy);
@@ -170,6 +205,30 @@ namespace sqnice {
         set_update_handler(nullptr);
         set_authorize_handler(nullptr);
     }
+
+    status database::close_and_delete() {
+        bool temp = is_temporary();
+        string path = filename();       // TODO: Could this be a URI? What then?
+        if (auto rc = close(true); !ok(rc) || temp)
+            return rc;
+        return
+            delete_file(path, exceptions());
+    }
+
+    status database::delete_file(std::string_view path, bool exceptions) {
+        std::error_code ec;
+        auto del = [&](const char* suffix) -> bool {
+            return filesystem::remove(filesystem::path(string(path) + suffix), ec) 
+                || ec.value() == 0;
+        };
+        if (del("") && del("-wal") && del("-shm"))
+            return status::ok;
+        else if (exceptions)
+            throw database_error(ec.message().c_str(), status::ioerr);
+        else
+            return status::ioerr;
+    }
+
 
     sqlite3* database::check_handle() const {
         if (!db_) [[unlikely]]
@@ -220,30 +279,36 @@ namespace sqnice {
                                        SQLITE_DBCONFIG_ENABLE_FKEY, enable ? 1 : 0, nullptr));
     }
 
-    status database::enable_triggers(bool enable) {
-        return check(sqlite3_db_config(check_handle(),
-                                       SQLITE_DBCONFIG_ENABLE_TRIGGER, enable ? 1 : 0, nullptr));
-    }
-
     status database::set_busy_timeout(int ms) {
         return check(sqlite3_busy_timeout(check_handle(), ms));
     }
 
+    status database::set_cache_size_KB(size_t size) {
+        return pragma("cache_size", -int64_t(size));
+    }
+
+
     status database::setup() {
-        assert(is_open());
-        status rc = enable_foreign_keys();
-        if (!ok(rc)) {return rc;}
-        rc = set_busy_timeout(5000);
+        status rc = setup_connection();
         if (ok(rc) && is_writeable()) {
-            rc = execute("PRAGMA auto_vacuum = incremental;" // must be the first statement executed
-                         "PRAGMA journal_mode = WAL;"
-                         "PRAGMA synchronous=normal");
+            // "auto-vacuuming must be turned on before any tables are created.
+            // It is not possible to enable or disable auto-vacuum after a table has been created."
+            rc = execute("PRAGMA auto_vacuum = incremental;"
+                         "PRAGMA journal_mode = WAL");
         }
-        auto dbc = db_.get();
-        sqlite3_db_config(dbc, SQLITE_DBCONFIG_DEFENSIVE, 1, 0);  // disallow db corruption
-        sqlite3_db_config(dbc, SQLITE_DBCONFIG_DQS_DML,   0, 0); // disallow double-quoted strs
-        sqlite3_db_config(dbc, SQLITE_DBCONFIG_DQS_DDL,   0, 0);
         return rc;
+    }
+
+    status database::setup_connection() {
+        auto dbc = check_handle();
+        set_busy_timeout(5000);
+        sqlite3_db_config(dbc, SQLITE_DBCONFIG_ENABLE_FKEY, 1, 0); // enforce foreign-key constraints
+        sqlite3_db_config(dbc, SQLITE_DBCONFIG_DEFENSIVE,   1, 0); // disallow db corruption
+        sqlite3_db_config(dbc, SQLITE_DBCONFIG_DQS_DML,     0, 0); // disallow double-quoted strs
+        sqlite3_db_config(dbc, SQLITE_DBCONFIG_DQS_DDL,     0, 0); // disallow double-quoted strs
+        if (is_writeable())
+            return execute(is_temporary() ? "PRAGMA synchronous=off" : "PRAGMA synchronous=normal");
+        return status::ok;
     }
 
 

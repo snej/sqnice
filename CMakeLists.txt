@@ -62,6 +62,7 @@ add_library( sqnice STATIC
     src/blob_stream.cc
     src/database.cc
     src/functions.cc
+    src/pool.cc
     src/query.cc
     src/transaction.cc
 )

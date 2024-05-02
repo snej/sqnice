@@ -50,29 +50,34 @@ namespace sqnice {
 
 
     /** Flags used when opening a database; equivalent to `SQLITE_OPEN_...` macros in sqlite3.h. */
-    enum class open_flags : int {
-        readonly        = 0x00000001,   ///< Open database file as read-only
+    enum class open_flags : unsigned {
+        readonly        = 0x00000000,   ///< Not really a flag, just the absence of `readwrite`
         readwrite       = 0x00000002,   ///< Open database file as writeable, if possible
         create          = 0x00000004,   ///< Create database file if it doesn't exist
         uri             = 0x00000040,   ///< filename may be a `file:` URI (see docs)
-        memory          = 0x00000080,   ///< Open a temporary in-memory database
+        memory          = 0x00000080,   ///< Open a temporary in-memory database; filename ignored.
         nomutex         = 0x00008000,   ///< Use the "multi-thread" threading mode (see docs)
         fullmutex       = 0x00010000,   ///< Use the "serialized" threading mode (see docs)
         nofollow        = 0x01000000,   ///< Symbolic links in path will not be followed
+        // nonstandard flags:
+        delete_first    = 0x80000000,   ///< Delete any pre-existing file; requires `create`
+        temporary       = 0x40000000,   ///< Create temporary file, deleted on close
 #ifdef __APPLE__
-        // Add no more than one of these, to specify an iOS file protection mode.
+        // Apple-specific flags; add one of these to specify an iOS file protection mode.
         fileprotection_complete             = 0x00100000,
         fileprotection_complete_unless_open = 0x00200000,
         fileprotection_complete_until_auth  = 0x00300000,
         fileprotection_none                 = 0x00400000,
 #endif
+        defaults        = readwrite | create,   ///< Default flags: `readwrite` and `create`
     };
 
-    inline open_flags operator| (open_flags a, open_flags b) {return open_flags(int(a) | int(b));}
-    inline open_flags operator& (open_flags a, open_flags b) {return open_flags(int(a) & int(b));}
-    inline open_flags operator- (open_flags a, open_flags b) {return open_flags(int(a) & ~int(b));}
-    inline open_flags& operator|= (open_flags& a, open_flags b) {a = a | b; return a;}
-    inline bool operator!(open_flags a) {return !int(a);}
+    inline constexpr open_flags operator| (open_flags a, open_flags b) {return open_flags(int(a) | int(b));}
+    inline constexpr open_flags operator& (open_flags a, open_flags b) {return open_flags(int(a) & int(b));}
+    inline constexpr open_flags operator- (open_flags a, open_flags b) {return open_flags(int(a) & ~int(b));}
+    inline constexpr open_flags& operator|= (open_flags& a, open_flags b) {a = a | b; return a;}
+    inline constexpr bool operator!(open_flags a) {return !int(a);}
+    open_flags normalize(open_flags);
 
     /** Per-database size/quantity limits that can be adjusted. */
     enum class limit : int {
@@ -98,31 +103,39 @@ namespace sqnice {
     /** A SQLite database connection. */
     class database : public checking, noncopyable {
     public:
-        /// Constructs a `database` and opens a SQLite database file. Details depend on the flags.
+        /// Constructs a `database` and calls `open` with the same arguments; see the docs of that
+        /// method for details.
+        ///
         /// Exceptions are enabled by default! If you want to open a database without potentially
         /// throwing an exception, use the no-arguments constructor instead, then call
-        /// `exceptions(false)` and then `connect(filename,...)`.
-        /// @throws database_error if the database cannot be opened.
+        /// `exceptions(false)` and then `open(filename,...)`.
         explicit database(std::string_view filename,
-                          open_flags flags           = open_flags::readwrite | open_flags::create,
-                          const char* _Nullable vfs  = nullptr);
-
-        /// Constructs an instance that uses an already-open SQLite database handle.
-        /// Its destructor, and the `close` method, will not close this handle.
-        explicit database(sqlite3*) noexcept;
+                          open_flags flags          = open_flags::defaults,
+                          const char* _Nullable vfs = nullptr);
 
         /// Constructs an instance that isn't connected to any database.
         /// You must call `connect` before doing anything else with it.
         database() noexcept;
+
+        /// Constructs an instance that uses an already-open SQLite database handle.
+        /// The destructor, and the `close` method, will not close this handle.
+        explicit database(sqlite3*) noexcept;
 
         database(database&& db) noexcept;
         database& operator=(database&& db) noexcept;
         ~database() noexcept;
 
         /// Opens (connects to) a database file. Any existing connection is closed first.
+        /// @param filename  The filesystem path to the database, including any extension.
+        ///                  An empty string represents a temporary on-disk database.
+        ///                  This parameter is ignored if the `memory` flag is given.
+        /// @param flags Specifies how the database is opened; see documentation of each flag.
+        /// @param vfs  Name of Virtual File-System to use, if any.
+        /// @returns  Result status.
+        /// @throws `database_error` if exceptions are enabled.
         status open(std::string_view filename,
-                    open_flags flags           = open_flags::readwrite | open_flags::create,
-                    const char*  _Nullable vfs = nullptr);
+                    open_flags flags          = open_flags::defaults,
+                    const char* _Nullable vfs = nullptr);
 
         /// Opens a new, temporary and anonymous SQLite database.
         /// Any existing connection is closed first.
@@ -146,6 +159,16 @@ namespace sqnice {
         ///     be dangerous, especially if that file is re-created before SQLite closes it;
         ///     this is one of the known ways to corrupt a SQLite database.
         status close(bool immediately = true);
+
+        /// Closes the database and deletes its file(s).
+        /// @warning  There must be no other open connections to the same database file!
+        status close_and_delete();
+
+        /// Deletes a database file at `path`, and any associated "-wal" or "-shm" files.
+        /// @returns `ok` if deleted, `cantopen` if file doesn't exist, else other error status.
+        /// @throws `database_error` if `exceptions` is true and status is not `ok` or `cantopen`.
+        /// @warning  There must be no open connections to the same database file!
+        static status delete_file(std::string_view path, bool exceptions = true);
 
         /// The filename (path) of the open database, as passed to the constructor or `connect`.
         [[nodiscard]] const char* filename() const noexcept;
@@ -174,23 +197,40 @@ namespace sqnice {
         /// e.g. {3, 43, 1}.
         static std::tuple<int,int,int> sqlite_version() noexcept;
 
-        /// Configures the database according to current best practices.
-        /// This is optional, but recommended. It must be called immedidately after opening.
-        ///
-        /// It does the following things:
+        /// Configures this database **connection** according to current best practices.
+        /// This is optional, but recommended. It does the following things:
         /// * Enables foreign key checks.
         /// * Sets a busy timeout of 5 seconds.
         /// * Enables "defensive mode", preventing some ways of corrupting a database through SQL.
         /// * Disallows the use of double-quotes for SQL strings (an old misfeature.)
+        /// * Sets the `synchronous` pragma to `normal`, or to `off` for a temporary database.
+        status setup_connection();
+
+        /// Configures the database **file** according to current best practices.
+        /// This is optional, but recommended. It should be called immedidately after opening
+        /// a database. The auto-vacuum mode setting will only take effect if `setup` is the
+        /// first call made to a newly-created database file.
         ///
-        /// If the database is writeable, it also:
+        /// If the database file has already been configured by an earlier call to `setup`,
+        /// no changes are made to it.
+        ///
+        /// This method first calls `setup_connection`. Then, if the database is writeable, it also:
         /// * Sets the journal mode to WAL
-        /// * Sets the `synchronous` pragma to `normal`
         /// * Enables incremental auto-vacuum mode
         status setup();
 
+        /// Sets the database connection's maximum RAM cache size, in kilobytes.
+        /// SQLite's default is 20,000 (20MB).
+        status set_cache_size_KB(size_t kb);
+
+        /// Enables/disables enforcement of foreign-key constraints. The default is off, but
+        /// the `setup_connection` method turns it on.
         status enable_foreign_keys(bool enable = true);
-        status enable_triggers(bool enable = true);
+
+        /// Sets how long SQLite will wait to acquire the lock of a busy database, before writing.
+        /// If the timeout expires (or is set to 0) the operation will fail with `status::busy`.
+        /// The default is 0. `setup_connection` sets it to 5000 (five seconds.)
+        /// @param ms  The timeout, in _milliseconds_, or 0 to disable waiting.
         status set_busy_timeout(int ms);
 
         /// Returns the current value of a limit. (See the `limits` enum.)
@@ -397,15 +437,15 @@ namespace sqnice {
                                  destroyFn _Nullable destroy);
 
     private:
-        friend class blob_stream;
         friend class checking;
-        friend class statement;
+        friend class pool;
 
         void set_db(db_handle db) {
             db_ = std::move(db);
             weak_db_ = db_;
         }
         void tear_down() noexcept;
+        void set_borrowed(bool b) const noexcept            {borrowed_ = b;}
 
         // internal gunk used by create_function and create_aggregate.
         // Implementations in functions.hh.
@@ -427,6 +467,7 @@ namespace sqnice {
         int                 txn_depth_ = 0;
         bool                txn_immediate_ = false;
         bool                temporary_ = false;
+        bool mutable        borrowed_ = false;      // Checked out from a `pool`
         std::unique_ptr<database_error> posthumous_error_;
         std::unique_ptr<statement_cache<sqnice::command>> commands_;
         std::unique_ptr<statement_cache<sqnice::query>> mutable queries_;

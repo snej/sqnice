@@ -1,5 +1,6 @@
 #include "sqnice_test.hh"
 #include "sqnice/functions.hh"
+#include "sqnice/pool.hh"
 
 using namespace std;
 using namespace std::placeholders;
@@ -147,4 +148,47 @@ TEST_CASE_METHOD(sqnice_test, "SQNice callbacks", "[sqnice]") {
         cmd.execute();
     }
 
+}
+
+TEST_CASE("SQNice pool", "[sqnice]") {
+    sqnice::pool p("/tmp/sqnice_test.sqlite3",
+                   sqnice::open_flags::delete_first | sqnice::open_flags::readwrite);
+    {
+        auto db = p.borrow_writeable();
+        CHECK(p.borrowed_count() == 1);
+        db->execute(R"""(
+            CREATE TABLE contacts (
+              id INTEGER PRIMARY KEY,
+              name TEXT NOT NULL,
+              phone TEXT NOT NULL,
+              address TEXT,
+              UNIQUE(name, phone)
+            );
+          )""");
+        db->execute("");
+        auto cmd = db->command("INSERT INTO contacts (name, phone) VALUES (?1, ?2)");
+        cmd.execute("Bob", "555-1212");
+
+        CHECK(p.try_borrow_writeable() == nullptr);
+    }
+
+    CHECK(p.borrowed_count() == 0);
+
+    auto db1 = p.borrow();
+    CHECK(p.borrowed_count() == 1);
+    string name = db1->query("SELECT name FROM contacts").single_value_or<string>("");
+    CHECK(name == "Bob");
+
+    auto db2 = p.borrow();
+    CHECK(p.borrowed_count() == 2);
+    auto db3 = p.borrow();
+    CHECK(p.borrowed_count() == 3);
+    auto db4 = p.borrow();
+    CHECK(p.borrowed_count() == 4);
+
+    CHECK(p.try_borrow() == nullptr);
+    db1.reset();
+    CHECK(p.borrowed_count() == 3);
+    auto db5 = p.borrow();
+    CHECK(p.borrowed_count() == 4);
 }

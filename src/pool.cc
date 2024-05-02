@@ -42,9 +42,9 @@ namespace sqnice {
     pool::pool(std::string_view dbname, open_flags flags, const char* vfs)
     :_dbname(std::move(dbname))
     ,_vfs(vfs ? vfs : "")
-    ,_flags(flags)
+    ,_flags(normalize(flags))
     {
-        if (_dbname.empty() || !!(_flags & open_flags::memory))
+        if (!!(_flags & open_flags::temporary))
             throw invalid_argument("pool does not support in-memory or temporary databases");
     }
 
@@ -54,6 +54,7 @@ namespace sqnice {
         return _ro_capacity + 1;    // public API includes writeable db in capacity
     }
 
+
     void pool::set_capacity(unsigned newCapacity) {
         if (newCapacity < 2)
             throw invalid_argument("capacity must be at least 2");
@@ -62,8 +63,14 @@ namespace sqnice {
         _ro_capacity = newCapacity - 1;
         // Toss out any excess RO databases:
         int keep = std::max(0, int(_ro_capacity) - int(_ro_total - _readonly.size()));
-        if (keep < _readonly.size())
-            _readonly.resize(keep);
+        while (_readonly.size() > keep)
+            _readonly.pop_back();
+    }
+
+
+    void pool::on_open(std::function<void(database&)> init) {
+        unique_lock lock(_mutex);
+        _initializer = std::move(init);
     }
 
 
@@ -89,55 +96,77 @@ namespace sqnice {
     }
 
 
+    // Allocates a new database.
+    unique_ptr<database> pool::new_db(bool writeable) {
+        using enum open_flags;
+        auto flags = _flags;
+        if (!writeable)
+            flags = flags - readwrite - create;
+        auto db = make_unique<database>(_dbname, flags, (_vfs.empty() ? nullptr : _vfs.c_str()));
+        _flags = _flags - delete_first; // definitely don't want to do that twice!
+        if (_initializer)
+            _initializer(*db);
+        return db;
+    }
+
+
     borrowed_database pool::borrow(bool or_wait) {
         unique_lock lock(_mutex);
         while(true) {
-            database const* db = nullptr;
+            unique_ptr<const database> dbp;
             if (!_readonly.empty()) {
-                db = std::move(_readonly.back()).release();
+                dbp = std::move(_readonly.back());
                 _readonly.pop_back();
             } else if (_ro_total < _ro_capacity) {
-                db = new_db(false);
+                dbp = new_db(false);
                 ++_ro_total;
             }
-            if (db)
-                return borrowed_database(db, *this);
-            else if (!or_wait)
+            if (dbp) {
+                dbp->set_borrowed(true);
+                return borrowed_database(dbp.release(), *this);
+            } else if (!or_wait) {
                 return {nullptr, *this};
-
+            }
+            // Nothing available, so wait
             _cond.wait(lock);
         }
     }
 
 
     borrowed_writeable_database pool::borrow_writeable(bool or_wait) {
-        if (!(_flags & open_flags::readwrite))
+        if (!(_flags & (open_flags::readwrite | open_flags::delete_first)))
             throw logic_error("no writeable database available");
         unique_lock lock(_mutex);
-        database* dbp = nullptr;
+        unique_ptr<database> dbp;
         if (_rw_total == 0) {
+            // First-time creation of the writeable db:
             dbp = new_db(true);
             if (!dbp->is_writeable()) {
-                delete dbp;
                 throw database_error("database file is not writeable", status::locked);
             }
             ++_rw_total;
-        } else if (or_wait) {
+        } else if (_readwrite || or_wait) {
+            // Get the db, waiting if necessary:
             _cond.wait(lock, [&] {return _readwrite != nullptr;});
-            dbp = _readwrite.release();
+            dbp = std::move(_readwrite);
+        } else {
+            // db isn't available and `or_wait` is false, so return null:
+            return borrowed_writeable_database{nullptr, *this};
         }
-        return borrowed_writeable_database(dbp, *this);
+        dbp->set_borrowed(true);
+        return borrowed_writeable_database(dbp.release(), *this);
     }
 
 
     // The "deleter" function of `borrowed_ro_db`. Returns the db to the pool.
     void pool::operator()(database const* dbp) noexcept {
         if (dbp) {
+            const_cast<database*>(dbp)->set_borrowed(false);
             unique_lock lock(_mutex);
             assert(!dbp->is_writeable());
             assert(_readonly.size() < _ro_total);
             if (_ro_total < _ro_capacity) {
-                _readonly.emplace_front(dbp);
+                _readonly.emplace_back(dbp);
                 _cond.notify_all();
             } else {
                 // Toss out a DB if capacity was lowered after it was checked out:
@@ -151,6 +180,7 @@ namespace sqnice {
     // The "deleter" function of `borrowed_writeable_database`. Returns the db to the pool.
     void pool::operator()(database* dbp) noexcept {
         if (dbp) {
+            dbp->set_borrowed(false);
             assert(dbp->is_writeable());
             assert(dbp->transaction_depth() == 0);
             unique_lock lock(_mutex);
@@ -159,15 +189,6 @@ namespace sqnice {
             _readwrite.reset(const_cast<database*>(dbp));
             _cond.notify_all();
         }
-    }
-
-
-    // Allocates a new database.
-    database* pool::new_db(bool writeable) {
-        auto flags = _flags;
-        if (!writeable)
-            flags = (flags - open_flags::readwrite) | open_flags::readonly;
-        return new database(_dbname, flags, (_vfs.empty() ? nullptr : _vfs.c_str()));
     }
 
 }

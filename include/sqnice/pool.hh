@@ -28,8 +28,9 @@
 #define SQNICE_POOL_H
 
 #include "sqnice/database.hh"
-#include <deque>
+#include <functional>
 #include <mutex>
+#include <stack>
 
 ASSUME_NONNULL_BEGIN
 
@@ -48,55 +49,68 @@ namespace sqnice {
     public:
         /// Constructs a pool that will manage databases on the given file.
         /// No databases are opened until one of the borrow methods is called,
-        /// so any errors like file-not-found won't occur until then.
+        /// so any errors, like file-not-found, won't occur until then.
         ///
-        /// @note `open_flags::memory` is not allowed, nor is an empty filename,
-        ///       since SQLite doesn't allow multiple connections to temporary databases.
+        /// - If you don't include the flag `readwrite`, you won't be allowed to borrow a
+        ///   writeable database.
+        /// - The flags `temporary` and `memory` are not allowed, since SQLite doesn't support
+        ///   multiple connections to temporary databases.
+        /// - The flag `delete_first` is honored when the first database is opened, ignored
+        ///   after that (so you don't delete your own database!)
         explicit pool(std::string_view filename,
                       open_flags flags           = open_flags::readwrite | open_flags::create,
                       const char* _Nullable vfs  = nullptr);
 
+        /// `pool`'s destructor waits until all borrowed databases have been returned.
         ~pool()                                             {close_all();}
 
         /// The maximum number of databases the pool will create, including one writeable one.
-        /// Defaults to 4. Minimum value is 2 (otherwise why are you using a pool at all?)
+        /// Defaults to 5. Minimum value is 2 (otherwise why are you using a pool at all?)
         unsigned capacity();
 
         /// Sets the maximum number of databases the pool will create, including one writeable one.
-        /// The default is 4. Minimum value is 2 (otherwise why are you using a pool at all?)
-        /// @note  If you lower the capacity to a value less than the current `borrowed_count`,
-        ///        this method will block until the excess databases are returned.
+        /// The default is 5. Minimum value is 2 (otherwise why are you using a pool at all?)
         void set_capacity(unsigned capacity);
+
+        /// Registers a function that will be called just after a `database` is opened,
+        /// and can make connection-level changes; for example, calling `setup_connection`
+        /// or registering functions.
+        ///
+        /// This callback should not be used for file-level initialization, like creating tables,
+        /// since it will be called multiple times.
+        void on_open(std::function<void(database&)>);
 
         /// The number of databases currently borrowed. Ranges from 0 up to `capacity`.
         unsigned borrowed_count() const;
 
-        /// Returns a read-only database a client can use.
-        /// When the `borrowed_db` goes out of scope, the database is returned to the pool.
-        /// @note  If all RO databases are checked out, blocks until one is returned.
-        /// @throws `database_error` if a database can't be opened.
+        /// Returns a `unique_ptr` to a **read-only** database a client can use.
+        /// When the `borrowed_database` goes out of scope, the database is returned to the pool.
+        /// @note  If all read-only databases are checked out, waits until one is returned.
+        /// @throws `database_error` if opening a new database connection fails.
         borrowed_database borrow()                          {return borrow(true);}
 
-        /// Same as `borrow` but returns `nullptr` instead of blocking.
-        /// @throws `database_error` if a database can't be opened.
+        /// Same as `borrow`, except returns `nullptr` instead of waiting.
+        /// @throws `database_error` if opening a new database connection fails.
         borrowed_database try_borrow()                      {return borrow(false);}
 
-        /// Returns a writeable database a client can use.
-        /// There is one of these per pool, since SQLite only supports one writer at a time.
-        /// When the `borrowed_db` goes out of scope, the database is returned to the pool.
-        /// @note  If the writeable database is checcked out, blocks until it's returned.
-        /// @throws `database_error` if a database can't be opened.
-        borrowed_writeable_database borrow_writeable()      {return borrow_writeable(false);}
+        /// Returns a `unique_ptr` to a **writeable** database a client can use.
+        /// There is only one of these per pool, since SQLite only supports one writer at a time.
+        /// When the `borrowed_writeable_database` goes out of scope, the database is returned to
+        /// the pool.
+        /// @note  If the writeable database is checcked out, waits until it's returned.
+        /// @throws `database_error` if opening a new database connection fails.
+        borrowed_writeable_database borrow_writeable()      {return borrow_writeable(true);}
 
-        /// Same as `borrow_writeable` but returns `nullptr` instead of blocking.
-        /// @throws `database_error` if a database can't be opened.
-        borrowed_writeable_database try_borrow_writeable()  {return borrow_writeable(true);}
+        /// Same as `borrow_writeable`, except returns `nullptr` instead of waiting.
+        /// @throws `database_error` if opening a new database connection fails.
+        borrowed_writeable_database try_borrow_writeable()  {return borrow_writeable(false);}
 
         /// Blocks until all borrowed databases have been returned, then closes them.
         /// (The destructor also does this.)
         void close_all();
 
-        /// Closes all databases the pool has opened that aren't currently borrowed.
+        /// Closes all databases the pool has opened that aren't currently in use.
+        /// (The pool can still re-open more databases on demand, up to its capacity.)
         void close_unused();
 
     private:
@@ -105,21 +119,22 @@ namespace sqnice {
 
         borrowed_database borrow(bool);
         borrowed_writeable_database borrow_writeable(bool);
-        database* new_db(bool writeable);
+        std::unique_ptr<database> new_db(bool writeable);
         void operator() (database* _Nullable) noexcept;       // deleter
         void operator() (database const* _Nullable) noexcept; // deleter
 
-        using db_queue = std::deque<std::unique_ptr<const database>>;
+        using db_ptr = std::unique_ptr<const database>;
 
-        std::string const           _dbname, _vfs;
-        open_flags const            _flags;
-        std::mutex                  _mutex;
-        std::condition_variable     _cond;
-        unsigned                    _ro_capacity = 4;// Current capacity (of read-only)
-        unsigned                    _ro_total = 0;  // Number of read-only DBs I created
-        unsigned                    _rw_total = 0;  // Number of read-write DBs I created (0 or 1)
-        db_queue                    _readonly;      // FIFO queue of available RO DBs
-        std::unique_ptr<database>   _readwrite;     // The available RW DB
+        std::string const               _dbname, _vfs;  // Path & vfs to open
+        open_flags                      _flags;         // Flags to open with
+        std::mutex                      _mutex;         // Magic thread-safety voodoo
+        std::condition_variable         _cond;          // Magic thread-safety voodoo
+        std::function<void(database&)>  _initializer;   // Init fn called on each new `database`
+        unsigned                        _ro_capacity =4;// Current capacity (of read-only dbs)
+        unsigned                        _ro_total = 0;  // Number of read-only DBs I created
+        unsigned                        _rw_total = 0;  // Number of read-write DBs I created (0, 1)
+        std::vector<db_ptr>             _readonly;      // Stack of available RO DBs
+        std::unique_ptr<database>       _readwrite;     // The available RW DB
     };
 
 }
