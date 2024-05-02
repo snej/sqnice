@@ -173,35 +173,53 @@ TEST_CASE("SQNice pool", "[sqnice]") {
     }
 
     CHECK(pool.borrowed_count() == 0);
+    CHECK(pool.open_count() == 1);
 
     {
         auto db1 = pool.borrow();
         CHECK(pool.borrowed_count() == 1);
+        CHECK(pool.open_count() == 2);
         string name = db1->query("SELECT name FROM contacts").single_value_or<string>("");
         CHECK(name == "Bob");
 
         auto db2 = pool.borrow();
         CHECK(pool.borrowed_count() == 2);
+        CHECK(pool.open_count() == 3);
         auto db3 = pool.borrow();
         CHECK(pool.borrowed_count() == 3);
+        CHECK(pool.open_count() == 4);
         auto db4 = pool.borrow();
         CHECK(pool.borrowed_count() == 4);
+        CHECK(pool.open_count() == 5);
 
         CHECK(pool.try_borrow() == nullptr);
         db1.reset();
+
         CHECK(pool.borrowed_count() == 3);
+        CHECK(pool.open_count() == 5);
+
         auto db5 = pool.borrow();
         CHECK(pool.borrowed_count() == 4);
+        CHECK(pool.open_count() == 5);
 
         {
             sqnice::transaction txn(pool);
             CHECK(pool.borrowed_count() == 5);
             CHECK(pool.try_borrow_writeable() == nullptr);
         }
+
         CHECK(pool.borrowed_count() == 4);
+        CHECK(pool.open_count() == 5);
     }
+
     CHECK(pool.borrowed_count() == 0);
+    CHECK(pool.open_count() == 5);
+
     pool.close_all();
+
+    CHECK(pool.borrowed_count() == 0);
+    CHECK(pool.open_count() == 0);
+
     sqnice::database::delete_file(kDBPath);
 }
 

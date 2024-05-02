@@ -79,25 +79,45 @@ namespace sqnice {
     }
 
 
+    unsigned pool::open_count() const {
+        unique_lock lock(_mutex);
+        return _ro_total + _rw_total;
+    }
+
+
+    unsigned pool::borrowed_count() const {
+        unique_lock lock(_mutex);
+        return _borrowed_count();
+    }
+
+
+    unsigned pool::_borrowed_count() const {
+        return unsigned(_ro_total - _readonly.size()) + (_rw_total - !!_readwrite);
+    }
+
+
     void pool::close_all() {
         unique_lock lock(_mutex);
-        _cond.wait(lock, [&] { return borrowed_count() == 0; });
+        _close_unused();
+        _cond.wait(lock, [&] { return _borrowed_count() == 0; });
+        _close_unused();
+        assert(_open_count() == 0);
     }
 
 
     void pool::close_unused() {
         unique_lock lock(_mutex);
+        _close_unused();
+    }
+
+
+    void pool::_close_unused() {
         _ro_total -= _readonly.size();
         _readonly.clear();
         if (_readwrite) {
             _readwrite = nullptr;
             _rw_total = 0;
         }
-    }
-
-
-    unsigned pool::borrowed_count() const {
-        return unsigned(_ro_total - _readonly.size()) + (_rw_total - !!_readwrite);
     }
 
 
@@ -170,7 +190,7 @@ namespace sqnice {
             unique_lock lock(_mutex);
             assert(!dbp->is_writeable());
             assert(_readonly.size() < _ro_total);
-            if (_ro_total < _ro_capacity) {
+            if (_ro_total <= _ro_capacity) {
                 _readonly.emplace_back(dbp);
                 _cond.notify_all();
             } else {
