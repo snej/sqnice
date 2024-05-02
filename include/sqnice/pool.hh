@@ -81,6 +81,9 @@ namespace sqnice {
         /// since it will be called multiple times.
         void on_open(std::function<void(database&)>);
 
+        /// The number of databases open, both borrowed and available.
+        unsigned open_count() const;
+
         /// The number of databases currently borrowed. Ranges from 0 up to `capacity`.
         unsigned borrowed_count() const;
 
@@ -125,16 +128,19 @@ namespace sqnice {
     private:
         pool(pool&&) = delete;
         pool& operator=(pool&&) = delete;
+        unsigned _borrowed_count() const;
+        unsigned _open_count() const                    {return _ro_total + _rw_total;}
         borrowed_database borrow(bool);
         borrowed_writeable_database borrow_writeable(bool);
         std::unique_ptr<database> new_db(bool writeable);
+        void _close_unused();
 
         using db_ptr = std::unique_ptr<const database>;
 
         std::string const               _dbname, _vfs;  // Path & vfs to open
         open_flags                      _flags;         // Flags to open with
-        std::mutex                      _mutex;         // Magic thread-safety voodoo
-        std::condition_variable         _cond;          // Magic thread-safety voodoo
+        std::mutex mutable              _mutex;         // Magic thread-safety voodoo
+        std::condition_variable mutable _cond;          // Magic thread-safety voodoo
         std::function<void(database&)>  _initializer;   // Init fn called on each new `database`
         unsigned                        _ro_capacity =4;// Current capacity (of read-only dbs)
         unsigned                        _ro_total = 0;  // Number of read-only DBs I created

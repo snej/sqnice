@@ -256,6 +256,49 @@ namespace sqnice {
         /// @warning NEVER pass an untrusted string; it can enable SQL injection attacks!
         status pragma(const char* name, std::string_view value);
 
+#pragma mark - SCHEMA MIGRATION:
+
+        /// Returns the database's "user version", an app-defined version number. Initially 0.
+        [[nodiscard]] int64_t user_version() const;
+        
+        /// Sets the database's "user version", an app-defined version number.
+        status set_user_version(int64_t);
+
+        /// Simple schema upgrades. If the database's user version is equal to `old_version`,
+        /// executes the SQL command in `sql_command` and then sets the version to `new_version`.
+        /// The SQL will presumably change the database's schema by adding tables or indexes,
+        /// altering tables, etc.
+        /// It's recommended that you wrap all your migrations in a single transaction.
+        status migrate_from(int64_t old_version,
+                            int64_t new_version,
+                            std::string_view sql_command);
+
+        /// Simple schema upgrades. If the database's user version is less than `new_version`,
+        /// executes the SQL command(s) in `sql_command` and then sets the user version to
+        /// `new_version`.
+        /// The SQL will presumably change the database's schema by adding tables or indexes,
+        /// altering tables, etc.
+        /// It's recommended that you wrap all your migrations in a single transaction.
+        status migrate_to(int64_t new_version,
+                          std::string_view sql_command);
+
+        /// Simple schema upgrades. If the database's user version is equal to `old_version`,
+        /// calls `fn` and on success sets the user version to `new_version`.
+        /// The function will presumably change the database's schema by adding tables or indexes,
+        /// altering tables, etc.
+        /// It's recommended that you wrap all your migrations in a single transaction.
+        status migrate_from(int64_t old_version,
+                            int64_t new_version,
+                            std::function<status(database&)> fn);
+
+        /// Simple schema upgrades. If the database's user version is less than `new_version`,
+        /// calls `fn` and on success sets the user version to `new_version`.
+        /// The function will presumably change the database's schema by adding tables or indexes,
+        /// altering tables, etc.
+        /// It's recommended that you wrap all your migrations in a single transaction.
+        status migrate_to(int64_t new_version,
+                          std::function<status(database&)> fn);
+
 #pragma mark - STATUS:
 
         /// The status of the last operation on this database or its queries/commands/blob_handles.
