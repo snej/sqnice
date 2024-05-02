@@ -191,4 +191,11 @@ TEST_CASE("SQNice pool", "[sqnice]") {
     CHECK(p.borrowed_count() == 3);
     auto db5 = p.borrow();
     CHECK(p.borrowed_count() == 4);
+
+    {
+        sqnice::transaction txn(p);
+        CHECK(p.borrowed_count() == 5);
+        CHECK(p.try_borrow_writeable() == nullptr);
+    }
+    CHECK(p.borrowed_count() == 4);
 }

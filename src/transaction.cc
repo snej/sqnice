@@ -47,20 +47,19 @@ namespace sqnice {
             db.raise(rc);  // always throw -- constructor cannot return a status
     }
 
-    transaction::transaction(pool& pool, bool autocommit, bool immediate)
-    :borrowed_db_(pool.borrow_writeable())
-    {
-        status rc = begin(*borrowed_db_->get(), autocommit, immediate);
+    transaction::transaction(pool& pool, bool autocommit, bool immediate) {
+        status rc = begin(pool, autocommit, immediate);
         if (!ok(rc)) [[unlikely]]
-            (*borrowed_db_)->raise(rc);  // always throw -- constructor cannot return a status
+            checking::raise(rc, "can't begin transaction");  // always throw -- constructor cannot return a status
     }
 
     transaction::transaction(transaction &&t) noexcept
-    :borrowed_db_(std::move(t.borrowed_db_))
-    ,db_(t.db_)
+    :db_(t.db_)
+    ,from_pool_(t.from_pool_)
     ,autocommit_(t.autocommit_)
     {
         t.db_ = nullptr;
+        t.from_pool_ = nullptr;
     }
 
     status transaction::begin(database& db, bool autocommit, bool immediate) {
@@ -75,15 +74,23 @@ namespace sqnice {
     }
 
     status transaction::begin(pool& pool, bool autocommit, bool immediate) {
+        if (db_) [[unlikely]]
+            throw std::logic_error("transaction is already active");
         auto db = pool.borrow_writeable();
         status rc = begin(*db, autocommit, immediate);
-        if (ok(rc))
-            borrowed_db_.emplace(std::move(db));
+        if (ok(rc)) {
+            from_pool_ = &db.get_deleter();
+            db_ = db.release();
+        }
         return rc;
     }
 
     transaction::~transaction() {
         if (db_) {
+            optional<borrowed_writeable_database> bdb;
+            if (from_pool_)
+                bdb.emplace(db_, *from_pool_); // will be returned to pool on exit
+
             if (autocommit_ && !current_exception()) {
                 // It is legal (though discouraged) to throw an exception from a destructor,
                 // as long as the destructor was not called as part of unwinding the stack
@@ -108,6 +115,11 @@ namespace sqnice {
 
     status transaction::end(bool commit) {
         if (auto db = db_) [[likely]] {
+            optional<borrowed_writeable_database> bdb; // will be returned to pool on exit
+            if (from_pool_) {
+                bdb.emplace(db_, *from_pool_);
+                from_pool_ = nullptr;
+            }
             db_ = nullptr;
             return db->end_transaction(commit);
         } else if (commit) {

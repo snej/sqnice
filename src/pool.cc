@@ -49,6 +49,11 @@ namespace sqnice {
     }
 
 
+    pool::~pool()  {
+        close_all();
+    }
+
+
     unsigned pool::capacity() {
         unique_lock lock(_mutex);
         return _ro_capacity + 1;    // public API includes writeable db in capacity

@@ -98,8 +98,8 @@ namespace sqnice {
     private:
         status end(bool commit);
 
-        std::optional<std::unique_ptr<database, pool&>> borrowed_db_;
         database* _Nullable                             db_ = nullptr;
+        pool* _Nullable                                 from_pool_ = nullptr;
         bool                                            autocommit_ = false;
     };
 

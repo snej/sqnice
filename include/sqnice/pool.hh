@@ -45,7 +45,7 @@ namespace sqnice {
 
 
     /** A thread-safe pool of databases, for multi-threaded use. */
-    class pool {
+    class pool : noncopyable {
     public:
         /// Constructs a pool that will manage databases on the given file.
         /// No databases are opened until one of the borrow methods is called,
@@ -62,7 +62,7 @@ namespace sqnice {
                       const char* _Nullable vfs  = nullptr);
 
         /// `pool`'s destructor waits until all borrowed databases have been returned.
-        ~pool()                                             {close_all();}
+        ~pool();
 
         /// The maximum number of databases the pool will create, including one writeable one.
         /// Defaults to 5. Minimum value is 2 (otherwise why are you using a pool at all?)
@@ -117,6 +117,8 @@ namespace sqnice {
         friend borrowed_database;
         friend borrowed_writeable_database;
 
+        pool(pool&&) = delete;
+        pool& operator=(pool&&) = delete;
         borrowed_database borrow(bool);
         borrowed_writeable_database borrow_writeable(bool);
         std::unique_ptr<database> new_db(bool writeable);
