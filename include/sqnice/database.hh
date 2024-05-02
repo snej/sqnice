@@ -289,10 +289,6 @@ namespace sqnice {
         /** Executes a (non-`SELECT`) statement, or multiple statements separated by `;`. */
         status execute(std::string_view sql);
 
-        /** Same as `execute` but uses `printf`-style formatting to produce the SQL string.
-            @warning If using `%s`, be **very careful** not to introduce SQL injection attacks! */
-        status executef(char const* sql, ...)   sqnice_printflike(2, 3);
-
         /// Returns a `command` object that will run the given SQL statement.
         /// @note This object comes from an internal `command_cache`, so subsequent calls with the
         ///       same SQL string will use the precompiled statement instead of compiling it again.
@@ -388,6 +384,7 @@ namespace sqnice {
         using backup_handler = std::function<void (int, int, status)>;
 
         status backup(database& destdb, backup_handler h = {});
+
         status backup(std::string_view dbname,
                       database& destdb,
                       std::string_view destdbname,
@@ -427,6 +424,8 @@ namespace sqnice {
         using finishFn = void (*)(sqlite3_context*);
         using destroyFn = void (*)(void*);
 
+        /// Lowest-level API for defining a SQL function. You probably want to use
+        /// `create_function` or `create_aggregate` instead.
         status register_function(std::string_view name,
                                  int nArgs,
                                  function_flags,
@@ -446,6 +445,7 @@ namespace sqnice {
         }
         void tear_down() noexcept;
         void set_borrowed(bool b) const noexcept            {borrowed_ = b;}
+        status executef(char const* sql, ...)   sqnice_printflike(2, 3);
 
         // internal gunk used by create_function and create_aggregate.
         // Implementations in functions.hh.
@@ -463,11 +463,11 @@ namespace sqnice {
         };
 
     private:
-        db_handle           db_;
-        int                 txn_depth_ = 0;
-        bool                txn_immediate_ = false;
-        bool                temporary_ = false;
-        bool mutable        borrowed_ = false;      // Checked out from a `pool`
+        db_handle           db_;                    // shared_ptr<sqlite3>
+        int                 txn_depth_ = 0;         // Transaction nesting level
+        bool                txn_immediate_ = false; // True if outer txn is immediate
+        bool                temporary_ = false;     // True if db is temporary
+        bool mutable        borrowed_ = false;      // True if checked out from a `pool`
         std::unique_ptr<database_error> posthumous_error_;
         std::unique_ptr<statement_cache<sqnice::command>> commands_;
         std::unique_ptr<statement_cache<sqnice::query>> mutable queries_;

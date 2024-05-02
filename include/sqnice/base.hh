@@ -125,7 +125,7 @@ namespace sqnice {
         /// For other objects, it defaults to the value in the `database` they are created from.
         void exceptions(bool x) noexcept                {exceptions_ = x;}
         /// True if exceptions are enabled.
-        bool exceptions() const noexcept                {return exceptions_;}
+        [[nodiscard]] bool exceptions() const noexcept  {return exceptions_;}
 
         /// If `rc` is not OK, and exceptions are enabled, calls `raise(rc)`. Else returns it.
         status check(status rc) const;

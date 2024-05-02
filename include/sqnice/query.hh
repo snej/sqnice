@@ -134,7 +134,7 @@ namespace sqnice {
         std::string expanded_sql() const;
 
         /// True if the statement is running; `reset` clears this.
-        bool busy() const noexcept;
+        [[nodiscard]] bool busy() const noexcept;
 
         /// Stops the execution of the statement.
         /// @note  This does not clear bindings.
@@ -151,7 +151,7 @@ namespace sqnice {
 
         class bindstream;
         /// Returns a sort of output stream, on which each `<<` binds the next numbered parameter.
-        bindstream binder(int idx = 1);
+        [[nodiscard]] bindstream binder(int idx = 1);
 
         /// Returns the (1-based) index of a named parameter, or 0 if none exists.
         int parameter_index(const char* name) const noexcept;
@@ -377,12 +377,12 @@ namespace sqnice {
         /// A convenience method that runs the query and returns the value of the first row's
         /// first column. If there are no rows, returns `std::nullopt`.
         template <typename T>
-        std::optional<T> single_value();
+        [[nodiscard]] std::optional<T> single_value();
 
         /// A convenience method that runs the query and returns the value of the first row's
         /// first column. If there are no rows, returns `defaultResult` instead.
         template <typename T>
-        T single_value_or(T const& defaultResult);
+        [[nodiscard]] T single_value_or(T const& defaultResult);
 
         class row;
 
@@ -409,7 +409,7 @@ namespace sqnice {
 
         class getstream;
         /// Returns a sort of input stream from which columns can be read using `>>`.
-        getstream getter(unsigned idx = 0) const noexcept;
+        [[nodiscard]] getstream getter(unsigned idx = 0) const noexcept;
 
     private:
         friend class query;

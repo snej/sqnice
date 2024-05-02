@@ -144,11 +144,12 @@ namespace sqnice {
 
 
     void checking::log_warning(const char* format, ...) noexcept {
+        // unfortunately there is no `sqlite3_logv`...
         va_list args;
         va_start(args, format);
         char* message = sqlite3_vmprintf(format, args);
         va_end(args);
-        sqlite3_log(SQLITE_WARNING, message);
+        sqlite3_log(SQLITE_WARNING, "%s", message);
         sqlite3_free(message);
     }
 
