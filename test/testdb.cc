@@ -151,11 +151,11 @@ TEST_CASE_METHOD(sqnice_test, "SQNice callbacks", "[sqnice]") {
 }
 
 TEST_CASE("SQNice pool", "[sqnice]") {
-    sqnice::pool p("sqnice_test.sqlite3",
-                   sqnice::open_flags::delete_first | sqnice::open_flags::readwrite);
+    static constexpr string_view kDBPath = "sqnice_test.sqlite3";
+    sqnice::pool pool(kDBPath, sqnice::open_flags::delete_first | sqnice::open_flags::readwrite);
     {
-        auto db = p.borrow_writeable();
-        CHECK(p.borrowed_count() == 1);
+        auto db = pool.borrow_writeable();
+        CHECK(pool.borrowed_count() == 1);
         db->execute(R"""(
             CREATE TABLE contacts (
               id INTEGER PRIMARY KEY,
@@ -169,33 +169,96 @@ TEST_CASE("SQNice pool", "[sqnice]") {
         auto cmd = db->command("INSERT INTO contacts (name, phone) VALUES (?1, ?2)");
         cmd.execute("Bob", "555-1212");
 
-        CHECK(p.try_borrow_writeable() == nullptr);
+        CHECK(pool.try_borrow_writeable() == nullptr);
     }
 
-    CHECK(p.borrowed_count() == 0);
-
-    auto db1 = p.borrow();
-    CHECK(p.borrowed_count() == 1);
-    string name = db1->query("SELECT name FROM contacts").single_value_or<string>("");
-    CHECK(name == "Bob");
-
-    auto db2 = p.borrow();
-    CHECK(p.borrowed_count() == 2);
-    auto db3 = p.borrow();
-    CHECK(p.borrowed_count() == 3);
-    auto db4 = p.borrow();
-    CHECK(p.borrowed_count() == 4);
-
-    CHECK(p.try_borrow() == nullptr);
-    db1.reset();
-    CHECK(p.borrowed_count() == 3);
-    auto db5 = p.borrow();
-    CHECK(p.borrowed_count() == 4);
+    CHECK(pool.borrowed_count() == 0);
 
     {
-        sqnice::transaction txn(p);
-        CHECK(p.borrowed_count() == 5);
-        CHECK(p.try_borrow_writeable() == nullptr);
+        auto db1 = pool.borrow();
+        CHECK(pool.borrowed_count() == 1);
+        string name = db1->query("SELECT name FROM contacts").single_value_or<string>("");
+        CHECK(name == "Bob");
+
+        auto db2 = pool.borrow();
+        CHECK(pool.borrowed_count() == 2);
+        auto db3 = pool.borrow();
+        CHECK(pool.borrowed_count() == 3);
+        auto db4 = pool.borrow();
+        CHECK(pool.borrowed_count() == 4);
+
+        CHECK(pool.try_borrow() == nullptr);
+        db1.reset();
+        CHECK(pool.borrowed_count() == 3);
+        auto db5 = pool.borrow();
+        CHECK(pool.borrowed_count() == 4);
+
+        {
+            sqnice::transaction txn(pool);
+            CHECK(pool.borrowed_count() == 5);
+            CHECK(pool.try_borrow_writeable() == nullptr);
+        }
+        CHECK(pool.borrowed_count() == 4);
     }
-    CHECK(p.borrowed_count() == 4);
+    CHECK(pool.borrowed_count() == 0);
+    pool.close_all();
+    sqnice::database::delete_file(kDBPath);
+}
+
+
+TEST_CASE("SQNice schema migration", "[sqnice]") {
+    static constexpr string_view kDBPath = "sqnice_test.sqlite3";
+    sqnice::database::delete_file(kDBPath);
+    auto open_v1 = [] {
+        sqnice::database db(kDBPath);
+        db.setup();
+        sqnice::transaction txn(db);
+        db.migrate_from(0, 1, R"""(
+            CREATE TABLE contacts (
+              id INTEGER PRIMARY KEY,
+              name TEXT NOT NULL,
+              phone TEXT NOT NULL,
+              address TEXT,
+              UNIQUE(name, phone)
+            );
+          )""");
+        txn.commit();
+        CHECK(db.user_version() == 1);
+    };
+
+    open_v1();
+
+    open_v1();
+
+    auto open_v2 = [] (int64_t expectedVersion) {
+        sqnice::database db(kDBPath);
+        sqnice::transaction txn(db);
+        CHECK(db.user_version() == expectedVersion);
+
+        // Migration for a newly created database, leaving it at version 2:
+        db.migrate_from(0, 2, R"""(
+            CREATE TABLE contacts (
+              id INTEGER PRIMARY KEY,
+              name TEXT NOT NULL,
+              phone TEXT NOT NULL,
+              address TEXT,
+              age INTEGER,
+              UNIQUE(name, phone)
+            );
+          )""");
+
+        // Migration to upgrade version 1 (above) to version 2:
+        db.migrate_to(2, "ALTER TABLE contacts ADD COLUMN age INTEGER");
+        txn.commit();
+
+        CHECK(db.user_version() == 2);
+
+        db.execute("INSERT INTO contacts (name, phone, age) VALUES ('Alice', '555-1919', 39)");
+    };
+
+    open_v2(1);
+
+    sqnice::database::delete_file(kDBPath);
+
+    open_v2(0);
 }

@@ -312,6 +312,42 @@ namespace sqnice {
     }
 
 
+    int64_t database::user_version() const {
+        return const_cast<database*>(this)->pragma("user_version");
+    }
+
+    status database::set_user_version(int64_t v) {
+        return pragma("user_version", v);
+    }
+
+    status database::migrate_from(int64_t old, int64_t nuu, function<status (database &)> fn) {
+        assert(old < nuu);
+        if (user_version() == old) {
+            if (auto rc = fn(*this); !ok(rc))
+                return rc;
+            set_user_version(nuu);
+        }
+        return status::ok;
+    }
+
+    status database::migrate_to(int64_t nuu, function<status (database &)> fn) {
+        if (user_version() < nuu) {
+            if (auto rc = fn(*this); !ok(rc))
+                return rc;
+            set_user_version(nuu);
+        }
+        return status::ok;
+    }
+
+    status database::migrate_from(int64_t old, int64_t nuu, string_view sql) {
+        return migrate_from(old, nuu, [sql](database& db) {return db.execute(sql);});
+    }
+
+    status database::migrate_to(int64_t nuu, string_view sql) {
+        return migrate_to(nuu, [sql](database& db) {return db.execute(sql);});
+    }
+
+
     int64_t database::pragma(const char* pragma) {
         return sqnice::query(*this, string("PRAGMA \"") + pragma + "\"").single_value_or<int>(0);
     }
