@@ -23,6 +23,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#define SQNICE_LENIENT_FORMATTING   // so I can use %q
 
 #include "sqnice/database.hh"
 #include "sqnice/query.hh"
@@ -357,7 +358,7 @@ namespace sqnice {
     }
 
     status database::pragma(const char* pragma, int64_t value) {
-        return executef("PRAGMA %s(%d)", pragma, value);
+        return executef("PRAGMA %s(%lld)", pragma, (long long)value);
     }
 
     status database::pragma(const char* pragma, string_view value) {

@@ -245,7 +245,7 @@ namespace sqnice {
         ~statement() noexcept;
 
         std::shared_ptr<impl> give_impl(const void* _Nullable newOwner = nullptr);
-        status check_bind(int rc);
+        status check_bind(int rc, int idx);
         status bind_int(int idx, int value);
         status bind_int64(int idx, int64_t value);
         status bind_uint64(int idx, uint64_t value);
@@ -356,7 +356,7 @@ namespace sqnice {
         }
 
         /// The number of columns the query will produce.
-        int column_count() const noexcept;
+        unsigned column_count() const noexcept;
 
         /// The name of the `idx`'th column.
         /// @throws std::domain_error if the index is invalid.
