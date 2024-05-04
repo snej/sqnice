@@ -569,7 +569,8 @@ namespace sqnice {
         pragma("incremental_vacuum", nPages);
         if (always) {
             // On explicit compact, truncate the WAL file to save more disk space:
-            pragma("wal_checkpoint", "TRUNCATE");
+            check(sqlite3_wal_checkpoint_v2(check_handle(), nullptr, SQLITE_CHECKPOINT_TRUNCATE,
+                                            nullptr, nullptr));
         }
         return pageCount - pragma("page_count");
     }
