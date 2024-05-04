@@ -136,6 +136,10 @@ namespace sqnice {
         return check(rc);
     }
 
+    int statement::parameter_count() const noexcept {
+        return sqlite3_bind_parameter_count(any_stmt());
+    }
+
     int statement::parameter_index(const char* name) const noexcept {
         return sqlite3_bind_parameter_index(any_stmt(), name);
     }
