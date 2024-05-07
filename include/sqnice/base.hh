@@ -37,6 +37,10 @@
 #define SQNICE_VERSION_MINOR 0
 #define SQNICE_VERSION_PATCH 0
 
+#ifndef __has_attribute
+#  define __has_attribute(A) 0
+#endif
+
 #ifndef __has_feature
 #  define __has_feature(F) 0
 #endif
@@ -53,7 +57,7 @@
 #  endif
 #endif
 
-#ifdef SQNICE_TYPECHECK_FORMAT
+#if __has_attribute(format) && !defined(SQNICE_LENIENT_FORMATTING)
 #  define sqnice_printflike(A, B) __attribute__((__format__ (__printf__, A, B)))
 #else
 #  define sqnice_printflike(A, B)
@@ -153,6 +157,9 @@ namespace sqnice {
         bool        exceptions_;
     };
 
+    
+    /// Utility function that's like `sprintf` but returns a `std::string`.
+    std::string format(const char* fmt, ...) sqnice_printflike(1,2);
 }
 
 ASSUME_NONNULL_END

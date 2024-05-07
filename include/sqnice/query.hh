@@ -153,6 +153,9 @@ namespace sqnice {
         /// Returns a sort of output stream, on which each `<<` binds the next numbered parameter.
         [[nodiscard]] bindstream binder(int idx = 1);
 
+        /// The number of bindable parameters.
+        int parameter_count() const noexcept;
+
         /// Returns the (1-based) index of a named parameter, or 0 if none exists.
         int parameter_index(const char* name) const noexcept;
 
@@ -192,6 +195,14 @@ namespace sqnice {
         status bind(int idx, nullptr_t);
 
         status bind(int idx, arg_value);
+
+        template <typename T>
+        status bind(int idx, std::optional<T> const val) {
+            if (val)
+                return bind(idx, *val);
+            else
+                bind(idx, nullptr);
+        }
 
         template <bindable T>
         status bind(int idx, T&& v) {
@@ -245,7 +256,7 @@ namespace sqnice {
         ~statement() noexcept;
 
         std::shared_ptr<impl> give_impl(const void* _Nullable newOwner = nullptr);
-        status check_bind(int rc);
+        status check_bind(int rc, int idx);
         status bind_int(int idx, int value);
         status bind_int64(int idx, int64_t value);
         status bind_uint64(int idx, uint64_t value);
@@ -356,7 +367,7 @@ namespace sqnice {
         }
 
         /// The number of columns the query will produce.
-        int column_count() const noexcept;
+        unsigned column_count() const noexcept;
 
         /// The name of the `idx`'th column.
         /// @throws std::domain_error if the index is invalid.
@@ -485,6 +496,14 @@ namespace sqnice {
         template<std::same_as<const void*> T> T get() const noexcept;
         template<std::same_as<blob> T> T get() const noexcept;
         template<std::same_as<null_type> T> T get() const noexcept      {return ignore;}
+
+        template <typename U>
+        std::optional<U> get() const noexcept {
+            if (not_null())
+                return get<U>();
+            else
+                return std::nullopt;
+        }
 
         template <columnable T> T get() const noexcept  {return column_helper<T>::get(*this);}
 

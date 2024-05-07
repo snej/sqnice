@@ -23,6 +23,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#define SQNICE_LENIENT_FORMATTING   // so I can use %q
 
 #include "sqnice/database.hh"
 #include "sqnice/query.hh"
@@ -357,7 +358,7 @@ namespace sqnice {
     }
 
     status database::pragma(const char* pragma, int64_t value) {
-        return executef("PRAGMA %s(%d)", pragma, value);
+        return executef("PRAGMA %s(%lld)", pragma, (long long)value);
     }
 
     status database::pragma(const char* pragma, string_view value) {
@@ -568,7 +569,8 @@ namespace sqnice {
         pragma("incremental_vacuum", nPages);
         if (always) {
             // On explicit compact, truncate the WAL file to save more disk space:
-            pragma("wal_checkpoint", "TRUNCATE");
+            check(sqlite3_wal_checkpoint_v2(check_handle(), nullptr, SQLITE_CHECKPOINT_TRUNCATE,
+                                            nullptr, nullptr));
         }
         return pageCount - pragma("page_count");
     }

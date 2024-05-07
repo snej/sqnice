@@ -127,14 +127,17 @@ namespace sqnice {
             rc = status::error;
         } else if (rc == status::error && exceptions_) {
             // Throw a better exception:
-            string message(sqlite3_errmsg(db.get()));
-            message += ", in SQL statement \"" + string(sql) + "\"";
-            throw invalid_argument(message);
+            throw invalid_argument(format("%s, in SQL statement \"%s\"",
+                                          sqlite3_errmsg(db.get()), string(sql).c_str()));
         } else if (ok(rc)) {
             finish();
             impl_ = shared_ptr<impl>(new impl(stmt));
         }
         return check(rc);
+    }
+
+    int statement::parameter_count() const noexcept {
+        return sqlite3_bind_parameter_count(any_stmt());
     }
 
     int statement::parameter_index(const char* name) const noexcept {
@@ -145,7 +148,8 @@ namespace sqnice {
         if (int idx = sqlite3_bind_parameter_index(any_stmt(), name); idx >= 1)
             return idx;
         else [[unlikely]]
-            throw invalid_argument("unknown binding name");
+            throw invalid_argument(format("unknown binding name \"%s\" for: %s",
+                                          name, sqlite3_sql(any_stmt())));
     }
 
     void statement::finish() noexcept {
@@ -217,65 +221,69 @@ namespace sqnice {
             sqlite3_clear_bindings(stmt());
     }
 
-    status statement::check_bind(int rc) {
+    status statement::check_bind(int rc, int idx) {
         if (exceptions_ && rc == SQLITE_RANGE) [[unlikely]]
-            throw invalid_argument("bind index out of range");
+            throw invalid_argument(format("parameter index %d out of range (max %d) for: %s",
+                                          idx, parameter_count(), sqlite3_sql(any_stmt())));
         else
             return check(rc);
     }
 
     status statement::bind_int(int idx, int value) {
-        return check_bind(sqlite3_bind_int(stmt(), idx, value));
+        return check_bind(sqlite3_bind_int(stmt(), idx, value), idx);
     }
 
     status statement::bind_double(int idx, double value) {
-        return check_bind(sqlite3_bind_double(stmt(), idx, value));
+        return check_bind(sqlite3_bind_double(stmt(), idx, value), idx);
     }
 
     status statement::bind_int64(int idx, int64_t value) {
-        return check_bind(sqlite3_bind_int64(stmt(), idx, value));
+        return check_bind(sqlite3_bind_int64(stmt(), idx, value), idx);
     }
 
     status statement::bind_uint64(int idx, uint64_t value) {
         if (value > INT64_MAX) [[unlikely]]
-            throw domain_error("uint64_t value too large for SQLite");
+            throw domain_error(format("uint64_t value 0x%llux is too large for SQLite",
+                                      (unsigned long long)value));
         return bind_int64(idx, int64_t(value));
     }
 
     status statement::bind(int idx, string_view value) {
         return check_bind(sqlite3_bind_text64(stmt(), idx, value.data(), value.size(),
-                                              SQLITE_TRANSIENT, SQLITE_UTF8));
+                                              SQLITE_TRANSIENT, SQLITE_UTF8), idx);
     }
 
     status statement::bind(int idx, uncopied_string value) {
         return check_bind(sqlite3_bind_text64(stmt(), idx, value.data(), value.size(),
-                                              SQLITE_STATIC, SQLITE_UTF8));
+                                              SQLITE_STATIC, SQLITE_UTF8), idx);
     }
 
     status statement::bind_blob(int idx, blob value, bool copy) {
+        int rc;
         if (value.data)
-            return check_bind(sqlite3_bind_blob64(stmt(), idx, value.data, value.size,
-                                                  copy ? SQLITE_TRANSIENT : SQLITE_STATIC));
+            rc = sqlite3_bind_blob64(stmt(), idx, value.data, value.size,
+                                                  copy ? SQLITE_TRANSIENT : SQLITE_STATIC);
         else
-            return check_bind(sqlite3_bind_zeroblob64(stmt(), idx, value.size));
+            rc = sqlite3_bind_zeroblob64(stmt(), idx, value.size);
+        return check_bind(rc, idx);
     }
 
     status statement::bind_pointer(int idx, void* ptr, const char* type, pointer_destructor dtor) {
-        return check_bind(sqlite3_bind_pointer(stmt(), idx, ptr, type, dtor));
+        return check_bind(sqlite3_bind_pointer(stmt(), idx, ptr, type, dtor), idx);
     }
 
     status statement::bind(int idx, nullptr_t) {
-        return check_bind(sqlite3_bind_null(stmt(), idx));
+        return check_bind(sqlite3_bind_null(stmt(), idx), idx);
     }
 
     status statement::bind(int idx, arg_value v) {
-        return check_bind(sqlite3_bind_value(stmt(), idx, v.value()));
+        return check_bind(sqlite3_bind_value(stmt(), idx, v.value()), idx);
     }
 
     statement::bindref statement::operator[] (char const *name) {
         auto idx = sqlite3_bind_parameter_index(stmt(), name);
         if (idx < 1 && exceptions_) [[unlikely]]
-            throw invalid_argument("unknown binding name");
+            throw invalid_argument(format("unknown binding name \"%s\"", name));
         return bindref(*this, idx);
     }
 
@@ -313,13 +321,14 @@ namespace sqnice {
 #pragma mark - QUERY:
 
 
-    int query::column_count() const noexcept {
+    unsigned query::column_count() const noexcept {
         return sqlite3_column_count(any_stmt());
     }
 
     unsigned query::check_idx(unsigned idx) const {
         if (idx >= column_count()) [[unlikely]]
-            throw invalid_argument("invalid column index");
+            throw invalid_argument(format("invalid column index %u (max %u)",
+                                          idx, column_count()));
         return idx;
     }
 
