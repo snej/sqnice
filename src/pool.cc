@@ -25,22 +25,14 @@
 
 
 #include "sqnice/pool.hh"
-#include <mutex>
 #include <cassert>
-
-#ifdef SQNICE_LOADABLE_EXTENSION
-#  include <sqlite3ext.h>
-SQLITE_EXTENSION_INIT1
-#else
-#  include <sqlite3.h>
-#endif
 
 namespace sqnice {
     using namespace std;
 
 
     pool::pool(std::string_view dbname, open_flags flags, const char* vfs)
-    :_dbname(std::move(dbname))
+    :_dbname(dbname)
     ,_vfs(vfs ? vfs : "")
     ,_flags(normalize(flags))
     {
@@ -54,7 +46,7 @@ namespace sqnice {
     }
 
 
-    unsigned pool::capacity() {
+    unsigned pool::capacity() const {
         unique_lock lock(_mutex);
         return _ro_capacity + 1;    // public API includes writeable db in capacity
     }

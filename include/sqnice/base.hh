@@ -146,7 +146,7 @@ namespace sqnice {
 
     protected:
         checking(std::weak_ptr<sqlite3> db, bool x)     :weak_db_(std::move(db)), exceptions_(x) { }
-        explicit checking(database &db);
+        explicit checking(database const&db);
         explicit checking(bool x)                       :exceptions_(x) { }
         status check(int rc) const                      {return check(status{rc});}
 

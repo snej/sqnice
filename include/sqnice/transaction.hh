@@ -28,7 +28,6 @@
 #define SQNICE_TRANSACTION_H
 
 #include "sqnice/base.hh"
-#include <optional>
 
 ASSUME_NONNULL_BEGIN
 

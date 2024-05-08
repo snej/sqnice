@@ -101,7 +101,7 @@ namespace sqnice {
     }
 
 
-    checking::checking(database &db)
+    checking::checking(database const& db)
     :checking(db.db_, db.exceptions_)
     { }
 

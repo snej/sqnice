@@ -33,6 +33,7 @@
 #include <cassert>
 #include <filesystem>
 #include <mutex>
+#include <utility>
 
 #ifdef SQNICE_LOADABLE_EXTENSION
 #  include <sqlite3ext.h>
@@ -321,7 +322,7 @@ namespace sqnice {
         return pragma("user_version", v);
     }
 
-    status database::migrate_from(int64_t old, int64_t nuu, function<status (database &)> fn) {
+    status database::migrate_from(int64_t old, int64_t nuu, const function<status (database &)>& fn) {
         assert(old < nuu);
         if (user_version() == old) {
             if (auto rc = fn(*this); !ok(rc))
@@ -331,7 +332,7 @@ namespace sqnice {
         return status::ok;
     }
 
-    status database::migrate_to(int64_t nuu, function<status (database &)> fn) {
+    status database::migrate_to(int64_t nuu, const function<status (database &)>& fn) {
         if (user_version() < nuu) {
             if (auto rc = fn(*this); !ok(rc))
                 return rc;
@@ -490,17 +491,17 @@ namespace sqnice {
 #pragma mark - BACKUP:
 
 
-    status database::backup(database& destdb, backup_handler h) {
+    status database::backup(database& destdb, const backup_handler& h) {
         return backup("main", destdb, "main", h);
     }
 
     status database::backup(string_view dbname,
                             database& destdb, 
                             string_view destdbname,
-                            backup_handler handler,
+                            const backup_handler& handler,
                             int step_page)
     {
-        auto rc = status::ok;
+        status rc;
         sqlite3_backup* bkup = sqlite3_backup_init(destdb.check_handle(),
                                                    string(destdbname).c_str(),
                                                    check_handle(),
@@ -636,27 +637,27 @@ namespace sqnice {
     }
 
     void database::set_busy_handler(busy_handler h) noexcept {
-        bh_ = h;
+        bh_ = std::move(h);
         sqlite3_busy_handler(check_handle(), bh_ ? busy_handler_impl : nullptr, &bh_);
     }
 
     void database::set_commit_handler(commit_handler h) noexcept {
-        ch_ = h;
+        ch_ = std::move(h);
         sqlite3_commit_hook(check_handle(), ch_ ? commit_hook_impl : nullptr, &ch_);
     }
 
     void database::set_rollback_handler(rollback_handler h) noexcept {
-        rh_ = h;
+        rh_ = std::move(h);
         sqlite3_rollback_hook(check_handle(), rh_ ? rollback_hook_impl : nullptr, &rh_);
     }
 
     void database::set_update_handler(update_handler h) noexcept {
-        uh_ = h;
+        uh_ = std::move(h);
         sqlite3_update_hook(check_handle(), uh_ ? update_hook_impl : nullptr, &uh_);
     }
 
     void database::set_authorize_handler(authorize_handler h) noexcept {
-        ah_ = h;
+        ah_ = std::move(h);
         sqlite3_set_authorizer(check_handle(), ah_ ? authorizer_impl : nullptr, &ah_);
     }
 

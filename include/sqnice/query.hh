@@ -31,7 +31,6 @@
 #include <algorithm>
 #include <concepts>
 #include <cstddef>
-#include <iterator>
 #include <optional>
 #include <span>
 #include <cassert>
@@ -201,7 +200,7 @@ namespace sqnice {
             if (val)
                 return bind(idx, *val);
             else
-                bind(idx, nullptr);
+                return bind(idx, nullptr);
         }
 
         template <bindable T>
@@ -455,7 +454,7 @@ namespace sqnice {
         template <typename T> T get() const noexcept;
 
         /// Implicit conversion to type `T`, for assignment or passing as a parameter.
-        template <typename T> operator T() const noexcept  {return get<T>();}
+        template <typename T> operator T() const noexcept  {return get<T>();} // NOLINT(*-explicit-constructor)
 
         /// The data type of the column value.
         data_type type() const noexcept;

@@ -132,7 +132,7 @@ namespace sqnice {
         /// @param flags Specifies how the database is opened; see documentation of each flag.
         /// @param vfs  Name of Virtual File-System to use, if any.
         /// @returns  Result status.
-        /// @throws `database_error` if exceptions are enabled.
+        /// @throws database_error if exceptions are enabled.
         status open(std::string_view filename,
                     open_flags flags          = open_flags::defaults,
                     const char* _Nullable vfs = nullptr);
@@ -166,7 +166,7 @@ namespace sqnice {
 
         /// Deletes a database file at `path`, and any associated "-wal" or "-shm" files.
         /// @returns `ok` if deleted, `cantopen` if file doesn't exist, else other error status.
-        /// @throws `database_error` if `exceptions` is true and status is not `ok` or `cantopen`.
+        /// @throws database_error if `exceptions` is true and status is not `ok` or `cantopen`.
         /// @warning  There must be no open connections to the same database file!
         static status delete_file(std::string_view path, bool exceptions = true);
 
@@ -289,7 +289,7 @@ namespace sqnice {
         /// It's recommended that you wrap all your migrations in a single transaction.
         status migrate_from(int64_t old_version,
                             int64_t new_version,
-                            std::function<status(database&)> fn);
+                            const std::function<status(database&)>& fn);
 
         /// Simple schema upgrades. If the database's user version is less than `new_version`,
         /// calls `fn` and on success sets the user version to `new_version`.
@@ -297,7 +297,7 @@ namespace sqnice {
         /// altering tables, etc.
         /// It's recommended that you wrap all your migrations in a single transaction.
         status migrate_to(int64_t new_version,
-                          std::function<status(database&)> fn);
+                          const std::function<status(database&)>& fn);
 
 #pragma mark - STATUS:
 
@@ -363,10 +363,12 @@ namespace sqnice {
         /// @param name  The SQL function name to register.
         /// @param h  The function that will be called. It gets arg values from the `function_args`
         ///             argument, and returns a result by assigning to the `function_result`.
+        /// @param nargs  The function's argument count, or -1 to accept any number.
+        /// @param flags  Optional attributes of the function.
         status create_function(std::string_view name, 
                                function_handler h,
                                int nargs = -1,
-                               function_flags = {});
+                               function_flags flags = {});
 
         /// Registers a SQL function. This variant takes care of marshaling the args & return value.
         /// @note  You must include "sqnice/functions.hh" or you'll get compile errors.
@@ -426,12 +428,12 @@ namespace sqnice {
 
         using backup_handler = std::function<void (int, int, status)>;
 
-        status backup(database& destdb, backup_handler h = {});
+        status backup(database& destdb, const backup_handler& h = {});
 
         status backup(std::string_view dbname,
                       database& destdb,
                       std::string_view destdbname,
-                      backup_handler h,
+                      const backup_handler& h,
                       int step_page = 5);
 
 #pragma mark - LOGGING
@@ -499,7 +501,7 @@ namespace sqnice {
         template<class R, class... Ps> struct create_function_impl;
         template<class R, class... Ps> struct create_function_impl<R (Ps...)> {
             status operator()(database& db, std::string_view name, function_flags flags, 
-                              void* fh, destroyFn destroy) {
+                              void* fh, destroyFn destroy) const {
                 return db.register_function(name, sizeof...(Ps), flags, fh, functionx_impl<R, Ps...>,
                                             nullptr, nullptr, destroy);
             }

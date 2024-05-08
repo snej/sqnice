@@ -29,6 +29,7 @@
 #include "sqnice/functions.hh"
 #include "statement_cache.hh"
 #include <cassert>
+#include <memory>
 
 #ifdef SQNICE_LOADABLE_EXTENSION
 #  include <sqlite3ext.h>
@@ -131,7 +132,7 @@ namespace sqnice {
                                           sqlite3_errmsg(db.get()), string(sql).c_str()));
         } else if (ok(rc)) {
             finish();
-            impl_ = shared_ptr<impl>(new impl(stmt));
+            impl_ = make_shared<impl>(stmt);
         }
         return check(rc);
     }

@@ -31,7 +31,6 @@
 #include <condition_variable>
 #include <functional>
 #include <mutex>
-#include <stack>
 
 ASSUME_NONNULL_BEGIN
 
@@ -67,7 +66,7 @@ namespace sqnice {
 
         /// The maximum number of databases the pool will create, including one writeable one.
         /// Defaults to 5. Minimum value is 2 (otherwise why are you using a pool at all?)
-        unsigned capacity();
+        unsigned capacity() const;
 
         /// Sets the maximum number of databases the pool will create, including one writeable one.
         /// The default is 5. Minimum value is 2 (otherwise why are you using a pool at all?)
@@ -90,11 +89,11 @@ namespace sqnice {
         /// Returns a `unique_ptr` to a **read-only** database a client can use.
         /// When the `borrowed_database` goes out of scope, the database is returned to the pool.
         /// @note  If all read-only databases are checked out, waits until one is returned.
-        /// @throws `database_error` if opening a new database connection fails.
+        /// @throws database_error if opening a new database connection fails.
         borrowed_database borrow()                          {return borrow(true);}
 
         /// Same as `borrow`, except returns `nullptr` instead of waiting.
-        /// @throws `database_error` if opening a new database connection fails.
+        /// @throws database_error if opening a new database connection fails.
         borrowed_database try_borrow()                      {return borrow(false);}
 
         /// Returns a `unique_ptr` to a **writeable** database a client can use.
@@ -102,11 +101,11 @@ namespace sqnice {
         /// When the `borrowed_writeable_database` goes out of scope, the database is returned to
         /// the pool.
         /// @note  If the writeable database is checcked out, waits until it's returned.
-        /// @throws `database_error` if opening a new database connection fails.
+        /// @throws database_error if opening a new database connection fails.
         borrowed_writeable_database borrow_writeable()      {return borrow_writeable(true);}
 
         /// Same as `borrow_writeable`, except returns `nullptr` instead of waiting.
-        /// @throws `database_error` if opening a new database connection fails.
+        /// @throws database_error if opening a new database connection fails.
         borrowed_writeable_database try_borrow_writeable()  {return borrow_writeable(false);}
 
         /// Blocks until all borrowed databases have been returned, then closes them.

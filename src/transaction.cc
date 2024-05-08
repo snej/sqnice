@@ -29,26 +29,19 @@
 #include "sqnice/pool.hh"
 #include <exception>
 
-#ifdef SQNICE_LOADABLE_EXTENSION
-#  include <sqlite3ext.h>
-SQLITE_EXTENSION_INIT1
-#else
-#  include <sqlite3.h>
-#endif
-
 namespace sqnice {
     using namespace std;
 
     transaction::transaction() = default;
 
-    transaction::transaction(database& db, bool autocommit, bool immediate) {
-        status rc = begin(db, autocommit, immediate);
+    transaction::transaction(database& db, bool immediate, bool autocommit) {
+        status rc = begin(db, immediate, autocommit);
         if (!ok(rc)) [[unlikely]]
             db.raise(rc);  // always throw -- constructor cannot return a status
     }
 
-    transaction::transaction(pool& pool, bool autocommit, bool immediate) {
-        status rc = begin(pool, autocommit, immediate);
+    transaction::transaction(pool& pool, bool immediate, bool autocommit) {
+        status rc = begin(pool, immediate, autocommit);
         if (!ok(rc)) [[unlikely]]
             checking::raise(rc, "can't begin transaction");  // always throw -- constructor cannot return a status
     }
@@ -62,7 +55,7 @@ namespace sqnice {
         t.from_pool_ = nullptr;
     }
 
-    status transaction::begin(database& db, bool autocommit, bool immediate) {
+    status transaction::begin(database& db, bool immediate, bool autocommit) {
         if (db_) [[unlikely]]
             throw std::logic_error("transaction is already active");
         status rc = db.check( db.begin_transaction(immediate) );
@@ -73,11 +66,11 @@ namespace sqnice {
         return rc;
     }
 
-    status transaction::begin(pool& pool, bool autocommit, bool immediate) {
+    status transaction::begin(pool& pool, bool immediate, bool autocommit) {
         if (db_) [[unlikely]]
             throw std::logic_error("transaction is already active");
         auto db = pool.borrow_writeable();
-        status rc = begin(*db, autocommit, immediate);
+        status rc = begin(*db, immediate, autocommit);
         if (ok(rc)) {
             from_pool_ = &db.get_deleter();
             db_ = db.release();
