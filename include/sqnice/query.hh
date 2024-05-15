@@ -450,12 +450,6 @@ namespace sqnice {
     /** Represents a single column of a query row; returned by `query::row[]`. */
     class column_value : sqnice::noncopyable {
     public:
-        /// Gets the value as type `T`.
-        template <typename T> T get() const noexcept;
-
-        /// Implicit conversion to type `T`, for assignment or passing as a parameter.
-        template <typename T> operator T() const noexcept  {return get<T>();} // NOLINT(*-explicit-constructor)
-
         /// The data type of the column value.
         data_type type() const noexcept;
         bool not_null() const noexcept                  {return type() != data_type::null;}
@@ -464,7 +458,10 @@ namespace sqnice {
         /// The length in bytes of a text or blob value.
         size_t size_bytes() const noexcept;
 
-        // The following are just the specializations of get<T>() ...
+        /// Implicit conversion to type `T`, for assignment or passing as a parameter.
+        template <typename T> operator T() const noexcept  {return get<T>();} // NOLINT(*-explicit-constructor)
+
+        // `get()` returns the value as any of various types, depending on what it's assigned to.
 
         template <std::signed_integral T>
         T get() const noexcept {
@@ -492,8 +489,10 @@ namespace sqnice {
         template<std::same_as<std::string> T> T get() const noexcept {
             return std::string(get<std::string_view>());
         }
+        template<std::same_as<std::span<const std::byte>> T> T get() const noexcept;
         template<std::same_as<const void*> T> T get() const noexcept;
         template<std::same_as<blob> T> T get() const noexcept;
+
         template<std::same_as<null_type> T> T get() const noexcept      {return ignore;}
 
         template <typename U>

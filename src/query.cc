@@ -76,7 +76,7 @@ namespace sqnice {
     statement::statement(statement const& other) noexcept
     :checking(other)
     ,impl_(other.impl_)
-    { 
+    {
         clear_bindings();
     }
 
@@ -263,7 +263,7 @@ namespace sqnice {
         int rc;
         if (value.data)
             rc = sqlite3_bind_blob64(stmt(), idx, value.data, value.size,
-                                                  copy ? SQLITE_TRANSIENT : SQLITE_STATIC);
+                                     copy ? SQLITE_TRANSIENT : SQLITE_STATIC);
         else
             rc = sqlite3_bind_zeroblob64(stmt(), idx, value.size);
         return check_bind(rc, idx);
@@ -318,7 +318,7 @@ namespace sqnice {
         return rc;
     }
 
-    
+
 #pragma mark - QUERY:
 
 
@@ -396,6 +396,14 @@ namespace sqnice {
 
     template<> void const* column_value::get() const noexcept {
         return sqlite3_column_blob(stmt_, idx_);
+    }
+
+    template<> span<const std::byte> column_value::get() const noexcept {
+        // It's important to make the calls in this order,
+        // so we get the size of the blob value, not the string value.
+        auto data = sqlite3_column_blob(stmt_, idx_);
+        auto size = sqlite3_column_bytes(stmt_, idx_);
+        return {(const byte*)data, size_t(size)};
     }
 
     template<> blob column_value::get() const noexcept {
