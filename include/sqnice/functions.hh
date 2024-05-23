@@ -104,9 +104,7 @@ namespace sqnice {
         void operator= (uncopied_blob v) noexcept                {set_blob(v, false);}
 
         template <resultable T>
-        void operator= (T&& v) noexcept {
-            set_helper(*this, std::forward<T>(v));
-        }
+        void operator= (T const& v) noexcept                    {set_helper(*this, v);}
 
         using pointer_destructor = void(*)(void*);
 

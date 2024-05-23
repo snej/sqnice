@@ -95,6 +95,29 @@ TEST_CASE_METHOD(sqnice_test, "SQNice bind null", "[sqnice]") {
     expect_eq(nullptr, address);
 }
 
+struct custom : sqnice::noncopyable { string str; void* self; };
+namespace sqnice {
+    inline status bind_helper(statement& stmt, int idx, custom const& c) {
+        REQUIRE(c.self == &c);
+        return stmt.bind(idx, uncopied(c.str));
+    }
+}
+
+TEST_CASE_METHOD(sqnice_test, "SQNice bind nocopy", "[sqnice]") {
+    sqnice::command cmd(db, "INSERT INTO contacts (name, phone) VALUES (?, ?)");
+    custom c;
+    c.str = "Longish name to ensure it gets heap allocated";
+    c.self = &c;
+    cmd.execute(c, "555-1234");
+
+    sqnice::query qry(db, "SELECT name, phone FROM contacts");
+    auto iter = qry.begin();
+    string name, phone;
+    (*iter).getter() >> name >> phone;
+    expect_eq("Longish name to ensure it gets heap allocated", name);
+    expect_eq("555-1234", phone);
+}
+
 TEST_CASE_METHOD(sqnice_test, "SQNice binder null", "[sqnice]") {
     sqnice::command cmd(db, "INSERT INTO contacts (name, phone, address) VALUES (?, ?, ?)");
     cmd.binder() << "Mike" << "555-1234" << nullptr;

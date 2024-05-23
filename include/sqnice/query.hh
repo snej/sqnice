@@ -204,8 +204,8 @@ namespace sqnice {
         }
 
         template <bindable T>
-        status bind(int idx, T&& v) {
-            return bind_helper(*this, idx, std::forward<T>(v));
+        status bind(int idx, T const& v) {
+            return bind_helper(*this, idx, v);
         }
 
         using pointer_destructor = void(*)(void*);
@@ -213,8 +213,8 @@ namespace sqnice {
 
         /// Binds a value to a named parameter.
         template <typename T>
-        status bind(char const* name, T&& v) {
-            return bind(check_parameter_index(name), std::forward<T>(v));
+        status bind(char const* name, T const& v) {
+            return bind(check_parameter_index(name), v);
         }
 
         sqlite3_stmt* stmt() const;
@@ -263,8 +263,8 @@ namespace sqnice {
         status bind_blob(int idx, blob value, bool copy);
 
         template <typename T, typename... Args>
-        void _bind_args(int idx, T&& arg, Args... rest) {
-            bind(idx, std::forward<T>(arg));
+        void _bind_args(int idx, T const& arg, Args&&... rest) {
+            bind(idx, arg);
             if constexpr (sizeof...(rest) > 0)
                 _bind_args(idx + 1, rest...);
         }
@@ -280,7 +280,7 @@ namespace sqnice {
         /// Assigning a value to a `bindref` calls `bind` on the `statement`.
         /// @note  This returns `status`, not `*this`, which is unusual for an assignment operator.
         template <class T>
-        status operator= (T&& value)              {return stmt_.bind(idx_, std::forward<T>(value));}
+        status operator= (T const& value)               {return stmt_.bind(idx_, value);}
 
     private:
         friend class statement;
@@ -296,7 +296,7 @@ namespace sqnice {
     class statement::bindstream {
     public:
         template <class T>
-        bindstream& operator << (T&& v)     {stmt_.bind(idx_++, std::forward<T>(v)); return *this;}
+        bindstream& operator << (T const& value)        {stmt_.bind(idx_++, value); return *this;}
 
     private:
         friend class statement;
@@ -326,12 +326,12 @@ namespace sqnice {
 
         /// Binds parameters to the arguments, then executes the statement.
         template <typename... Args>
-        status execute(Args... args)                    {_bind_args(1, args...); return execute();}
+        status execute(Args&&... args)                   {_bind_args(1, args...); return execute();}
 
         /// Binds parameters to the arguments, then executes the statement,
         /// but without throwing exceptions.
         template <typename... Args>
-        [[nodiscard]] status try_execute(Args... args) noexcept {
+        [[nodiscard]] status try_execute(Args&&... args) noexcept {
             _bind_args(1,args...);
             return try_execute();
         }
@@ -358,10 +358,10 @@ namespace sqnice {
 
         /// Binds its arguments to multiple query parameters starting at index 1.
         template <typename... Args>
-        query& operator() (Args... args) & {_bind_args(1, args...); return *this;}
+        query& operator() (Args&&... args) & {_bind_args(1, args...); return *this;}
 
         template <typename... Args>
-        [[nodiscard]] query operator() (Args... args) && {      // (variant avoids dangling ref to
+        [[nodiscard]] query operator() (Args&&... args) && {     // (variant avoids dangling ref to
             _bind_args(1, args...); return std::move(*this);    // rvalue by returning a copy)
         }
 
