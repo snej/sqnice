@@ -577,6 +577,32 @@ namespace sqnice {
     }
 
 
+#pragma mark - ENCRYPTION:
+
+
+#ifdef SQLITE_HAS_CODEC
+    // See <https://www.zetetic.net/sqlcipher/sqlcipher-api/>
+
+    const bool database::encryption_available = true;
+
+    status database::use_encryption_key(std::span<const std::byte> key) {
+        return check(sqlite3_key(check_handle(), key.data(), int(key.size())));
+    }
+
+    status database::rekey(std::span<const std::byte> newKey) {
+        return check(sqlite3_rekey(check_handle(), newKey.data(), int(newKey.size())));
+    }
+
+#else
+    const bool database::encryption_available = false;
+    status database::use_encryption_key(std::span<const std::byte> key) {
+        return check(status::error);
+    }
+    status database::rekey(std::span<const std::byte> newKey) {
+        return check(status::error);
+    }
+#endif
+
 
 #pragma mark - HOOKS:
 

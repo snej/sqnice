@@ -13,7 +13,8 @@ set(CMAKE_C_STANDARD            11)
 set(CMAKE_C_STANDARD_REQUIRED   ON)
 
 
-option(USE_LOCAL_SQLITE "Use copy of sqlite in the vendor subdirectory" OFF)
+option(USE_LOCAL_SQLITE    "Use copy of sqlite in the vendor subdirectory" OFF)
+option(USE_LOCAL_SQLCIPHER "Use copy of SQLCipher in the vendor subdirectory" OFF)
 
 
 #### CONFIG
@@ -30,7 +31,6 @@ else()
         -Wall
         -Wpedantic
         -Wno-unknown-pragmas
-        -Wno-unknown-warning-option
     )
     if (CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX)
         # GCC-specific:
@@ -51,7 +51,11 @@ else()
 endif()
 
 
-if (USE_LOCAL_SQLITE)
+if (USE_LOCAL_SQLCIPHER)
+    include_directories( BEFORE SYSTEM
+        vendor/sqlcipher/
+    )
+elseif (USE_LOCAL_SQLITE)
     include_directories( BEFORE SYSTEM
         vendor/sqlite/
     )
@@ -71,7 +75,34 @@ target_include_directories( sqnice PUBLIC
     include/
 )
 
-if (USE_LOCAL_SQLITE)
+if (USE_LOCAL_SQLCIPHER)
+    target_sources( sqnice PRIVATE
+        vendor/sqlcipher/sqlite3.c
+    )
+    set_source_files_properties(
+        vendor/sqlcipher/sqlite3.c  PROPERTIES COMPILE_OPTIONS "-Wno-error"
+    )
+    target_compile_definitions(sqnice PRIVATE
+        SQLITE_HAS_CODEC
+        SQLITE_TEMP_STORE=3
+    )
+    if(APPLE)
+        target_compile_definitions(sqnice PRIVATE
+            SQLCIPHER_CRYPTO_CC     # Use Apple's CommonCrypto lib for encryption
+        )
+        target_link_libraries( sqnice INTERFACE
+            "-framework CoreFoundation"
+            "-framework Security"
+        )
+    else()
+        target_compile_definitions(sqnice PRIVATE
+            SQLCIPHER_CRYPTO_OPENSSL
+        )
+        target_link_libraries( sqnice INTERFACE
+            crypto
+        )
+    endif()
+elseif (USE_LOCAL_SQLITE)
     target_sources( sqnice PRIVATE
         vendor/sqlite/sqlite3.c
     )

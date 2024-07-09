@@ -73,16 +73,16 @@ namespace sqnice {
 
     /** A SQLite error code. Values are the same as `SQLITE_OK`, `SQLITE_ERROR`, ... */
     enum class status : int {
-        ok          =  0,   cantopen    =  14,
+        ok          =  0,   cantopen    =  14,   done        = 101,
         error       =  1,   constraint  =  19,
         perm        =  3,   mismatch    =  20,
         abort       =  4,   misuse      =  21,
         busy        =  5,   auth        =  23,
         locked      =  6,   range       =  25,
-        readonly    =  8,   notice      =  27,
-        interrupt   =  9,   warning     =  28,
-        ioerr       = 10,   row         = 100,
-        corrupt     = 11,   done        = 101,
+        readonly    =  8,   not_a_db    =  26,
+        interrupt   =  9,   notice      =  27,
+        ioerr       = 10,   warning     =  28,
+        corrupt     = 11,   row         = 100,
     };
 
     /// Masks out other bits set in extended status codes

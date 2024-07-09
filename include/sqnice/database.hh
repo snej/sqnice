@@ -30,6 +30,7 @@
 #include "sqnice/base.hh"
 #include <functional>
 #include <optional>
+#include <span>
 #include <tuple>
 
 ASSUME_NONNULL_BEGIN
@@ -114,7 +115,7 @@ namespace sqnice {
                           const char* _Nullable vfs = nullptr);
 
         /// Constructs an instance that isn't connected to any database.
-        /// You must call `connect` before doing anything else with it.
+        /// You must call `open` before doing anything else with it.
         database() noexcept;
 
         /// Constructs an instance that uses an already-open SQLite database handle.
@@ -406,7 +407,6 @@ namespace sqnice {
                                      nullptr, stepx_impl<T, Ps...>, finishN_impl<T>, nullptr);
         }
 
-
 #pragma mark - MAINTENANCE
 
         /// Runs `PRAGMA incremental_vacuum(N)`. This causes up to N free pages to be removed from
@@ -435,6 +435,27 @@ namespace sqnice {
                       std::string_view destdbname,
                       const backup_handler& h,
                       int step_page = 5);
+
+#pragma mark - ENCRYPTED DATABASES:
+
+        /// True if sqnice was built with encryption support (SQLCipher or SEE)
+        static const bool encryption_available;
+
+        /// Unlocks an encrypted database, or makes a newly-created database encrypted,
+        /// by providing the key to use to encrypt/decrypt data.
+        ///
+        /// This should be called immediately after opening the database, since no data can be
+        /// read from an encrypted database without the key, and encryption can't be enabled in
+        /// a new database once data has been written to it.
+        /// @note  This function requires SQLCipher or the SQLite Encryption Extension.
+        ///        Otherwise it returns/throws status::error.
+        status use_encryption_key(std::span<const std::byte> key);
+
+        /// Changes the encryption key of an already-encrypted database.
+        /// Will not encrypt an existing unencrypted database!
+        /// @note  This function requires SQLCipher or the SQLite Encryption Extension.
+        ///        Otherwise it returns/throws status::error.
+        status rekey(std::span<const std::byte> newKey);
 
 #pragma mark - LOGGING
 
