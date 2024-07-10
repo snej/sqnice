@@ -132,7 +132,7 @@ namespace sqnice {
     }
 
     void checking::raise(status rc, const char* msg) {
-        switch (int(rc)) {
+        switch (int(basic_status(rc))) {
             case SQLITE_INTERNAL:
                 throw logic_error(msg);
             case SQLITE_NOMEM:
@@ -140,6 +140,11 @@ namespace sqnice {
             case SQLITE_RANGE:
             case SQLITE_MISUSE:
                 throw invalid_argument(msg);
+            case SQLITE_NOTADB:
+                // SQLite's regular error message is misleading
+                if (msg == nullptr || string_view(msg) == "file is not a database")
+                    msg = "database is encrypted (or possibly not a database file)";
+                throw database_error(msg, rc);
             case SQLITE_OK:
             case SQLITE_NOTICE:
             case SQLITE_WARNING:
