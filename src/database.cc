@@ -581,26 +581,48 @@ namespace sqnice {
 
 
 #ifdef SQLITE_HAS_CODEC
-    // See <https://www.zetetic.net/sqlcipher/sqlcipher-api/>
+    //TODO: Support both key and password mode, for both SQLCipher and SEE.
+    /*  Unfortunately they behave differently, and there is no obvious way to detect which one is
+        present. (The best way might be to call `sqlite3_key(db, 0, NULL)` and see if an error is
+        returned; if so, it's SQLCipher.)
+
+        SQLCipher: 
+        - the `key` string is treated as a password, unless it looks like a SQL hex blob the size
+          of a key, i.e. starts with `x'` and ends with `'` and has 2*keySize hex digits between.
+        - An empty string is not allowed.
+
+        SEE: 
+        - The `key` string is treated as a raw key by default. If longer than the cipher key
+          it's truncated; if shorter, it's repeated.
+        - If the length (nKey) is _negative_, the string is treated as a password. It must be NUL
+          terminated.
+        - If the length is zero and `pKey` is NULL, it denotes "no encryption".
+    //
+     */
 
     const bool database::encryption_available = true;
 
+    static pair<const char*,int> keyParams(string_view password) {
+        if (password.empty())
+            return {nullptr, 0};
+        else
+            return {password.data(), int(password.size())};
+    }
+
     status database::use_password(std::string_view password) {
-        return check(sqlite3_key(check_handle(), password.data(), int(password.size())));
+        auto [pKey, nKey] = keyParams(password);
+        return check(sqlite3_key(check_handle(), pKey, nKey));
     }
 
     status database::rekey(std::string_view newPassword) {
-        return check(sqlite3_rekey(check_handle(), newPassword.data(), int(newPassword.size())));
+        auto [pKey, nKey] = keyParams(newPassword);
+        return check(sqlite3_rekey(check_handle(), pKey, nKey));
     }
 
 #else
     const bool database::encryption_available = false;
-    status database::use_encryption_key(std::span<const std::byte> key) {
-        return check(status::error);
-    }
-    status database::rekey(std::span<const std::byte> newKey) {
-        return check(status::error);
-    }
+    status database::use_password(std::string_view password) {return check(status::error);}
+    status database::rekey(std::string_view newPassword)     {return check(status::error);}
 #endif
 
 

@@ -438,21 +438,47 @@ namespace sqnice {
 
 #pragma mark - ENCRYPTED DATABASES:
 
-        /// True if sqnice was built with encryption support (SQLCipher or SEE)
+        /// True if sqnice and SQLite were built with encryption support (SQLCipher or SEE.)
+        /// The macro `SQLITE_HAS_CODEC` must be defined when building sqnice.
         static const bool encryption_available;
 
         /// Unlocks an encrypted database, or makes a newly-created database encrypted,
         /// by providing the password to use to encrypt/decrypt data.
         ///
+        /// @note  SEE behaves somewhat differently; the input "string" will be treated as a raw
+        ///        encryption key, so it should contain binary data and be the same length as
+        ///        specified by the cipher, usually 32 bytes.
+        ///
         /// This should be called immediately after opening the database, since no data can be
         /// read from an encrypted database without the key, and encryption can't be enabled in
         /// a new database once data has been written to it.
+        ///
+        /// SQLite Encryption Extension supports calling this function with an empty string.
+        /// This does not encrypt a new database, but causes a few bytes to be reserved in every
+        /// every page, which will improve the quality of subsequent encryption.
+        ///
+        /// @warning Database encryption is a complex topic that needs more space than this comment!
+        ///        Please read the [SQLCipher](https://www.zetetic.net/sqlcipher)
+        ///        or [SQLite Encryption Extension](https://sqlite.org/com/see.html) docs first.
+        ///
         /// @note  This function requires SQLCipher or the SQLite Encryption Extension.
         ///        Otherwise it returns/throws status::error.
         status use_password(std::string_view password);
 
-        /// Changes the encryption password of an already-encrypted database.
-        /// Will not encrypt an existing unencrypted database!
+        /// Changes the encryption password of an existing database.
+        ///
+        /// @note  SEE behaves somewhat differently; the input "string" will be treated as a raw
+        ///        encryption key, so it should contain binary data and be the same length as
+        ///        specified by the cipher, usually 32 bytes.
+        ///
+        /// With SQLite Encryption Extension, this method will encrypt a non-encrypted database
+        /// in place, or if given an empty password will decrypt an encrypted database in place.
+        ///
+        /// SQLCipher does not support in-place encryption or decryption, so this function works
+        /// only with an already-encrypted database, and the password must not be empty. To learn
+        /// how to encrypt or decrypt an existing database, see:
+        /// https://discuss.zetetic.net/t/how-to-encrypt-a-plaintext-sqlite-database/868
+        ///
         /// @note  This function requires SQLCipher or the SQLite Encryption Extension.
         ///        Otherwise it returns/throws status::error.
         status rekey(std::string_view newPassword);
@@ -461,6 +487,7 @@ namespace sqnice {
 
         using log_handler = std::function<void (status, const char* message)>;
 
+        /// Registers a global callback function that will be passed every message SQLite logs.
         static void set_log_handler(log_handler) noexcept;
 
 
