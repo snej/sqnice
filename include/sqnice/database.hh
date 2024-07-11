@@ -442,20 +442,20 @@ namespace sqnice {
         static const bool encryption_available;
 
         /// Unlocks an encrypted database, or makes a newly-created database encrypted,
-        /// by providing the key to use to encrypt/decrypt data.
+        /// by providing the password to use to encrypt/decrypt data.
         ///
         /// This should be called immediately after opening the database, since no data can be
         /// read from an encrypted database without the key, and encryption can't be enabled in
         /// a new database once data has been written to it.
         /// @note  This function requires SQLCipher or the SQLite Encryption Extension.
         ///        Otherwise it returns/throws status::error.
-        status use_encryption_key(std::span<const std::byte> key);
+        status use_password(std::string_view password);
 
-        /// Changes the encryption key of an already-encrypted database.
+        /// Changes the encryption password of an already-encrypted database.
         /// Will not encrypt an existing unencrypted database!
         /// @note  This function requires SQLCipher or the SQLite Encryption Extension.
         ///        Otherwise it returns/throws status::error.
-        status rekey(std::span<const std::byte> newKey);
+        status rekey(std::string_view newPassword);
 
 #pragma mark - LOGGING
 

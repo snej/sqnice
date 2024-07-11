@@ -585,12 +585,12 @@ namespace sqnice {
 
     const bool database::encryption_available = true;
 
-    status database::use_encryption_key(std::span<const std::byte> key) {
-        return check(sqlite3_key(check_handle(), key.data(), int(key.size())));
+    status database::use_password(std::string_view password) {
+        return check(sqlite3_key(check_handle(), password.data(), int(password.size())));
     }
 
-    status database::rekey(std::span<const std::byte> newKey) {
-        return check(sqlite3_rekey(check_handle(), newKey.data(), int(newKey.size())));
+    status database::rekey(std::string_view newPassword) {
+        return check(sqlite3_rekey(check_handle(), newPassword.data(), int(newPassword.size())));
     }
 
 #else
