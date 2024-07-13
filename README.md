@@ -2,7 +2,7 @@
 
 SQNice is a _darn nice_ SQLite API for C++.
 
-It is based on [sqlite3pp](https://github.com/iwongu/sqlite3pp) by Wongoo Lee, but has been extensively modified by me, Jens Alfke ([@snej](https://github.com/snej)).
+It is based on [sqlite3pp][SQLITE3PP] by Wongoo Lee, but has been extensively modified by me, Jens Alfke ([@snej](https://github.com/snej)).
 
 In the nearly 20(!) years I've been using SQLite, I've learned a number of good practices, and how to avoid pitfalls from suble misuse of its APIs. 
 
@@ -43,6 +43,7 @@ With **SQNice** I've tried to take advantage of my learning and bake it into the
 
   * Easy access to getting and setting pragmas and limits.
   * Convenient API for incremental vacuuming, with an optional check for whether a minimum fraction of the file is free space.
+  * Database encryption API supports both [SQLCipher][SQLCIPHER] and the [SQLite Encryption Extension][SEE], and adapts to their different behavior for setting passwords vs. raw keys.
 
 ## Building It
 
@@ -52,7 +53,11 @@ There is a CMake build script, so if your build system is CMake too, you can sim
 
 Otherwise, just add the source files in `src/` to your project, and add `include/` to your header search path.
 
-If your OS doesn't have SQLite installed, or you want to statically link it, there is a copy of the source code in `vendor/sqlite`. It's the latest version as of this writing, 3.45.3, but of course you can download your own from [sqlite.org](https://sqlite.org/download.html). CMake will build and link this if you set the option `USE_LOCAL_SQLITE`, otherwise it expects to find the header and library in the usual search paths.
+If your OS doesn't have SQLite installed, or you want to statically link it, there is a copy of the source code in `vendor/sqlite`. It's the latest version as of this writing, 3.45.3, but of course you can download your own from [sqlite.org][SQLITE].
+
+There is also a copy of [SQLCipher][SQLCIPHER] 4.6 in `vendor/sqlcipher`; this is a modified version of SQLite 3.45.3 that supports encrypted databases. (sqnice also supports the official [SQLite Encryption Extension][SEE], but since that's not open-source you'd need to purchase and download it yourself.)
+
+If using CMake, set the option `USE_LOCAL_SQLITE` to build sqnice with the included SQLite source code. Or set the option `USE_LOCAL_SQLCIPHER` to build with the included SQLCipher. Otherwise it will link with whatever `sqlite` header and library are available on your system (such as the built-in shared library on Apple platforms.)
 
 ## Using It
 
@@ -181,3 +186,8 @@ If that doesn't meet your needs, other ways to achieve thread-safety are:
 
 - Open a single `database`, associate your own `mutex` with it, and make sure each thread locks the mutex while accessing the `database` or while using any `command` or `query` or `transaction` objects.
 - Open one `database` on each thread (on the same file), and make sure each thread uses only its database and derived objects. A thread-local variable can be useful for this.
+
+[SQLITE]:    https://sqlite.org/download.html
+[SQLITE3PP]: https://github.com/iwongu/sqlite3pp
+[SQLCIPHER]: https://www.zetetic.net/sqlcipher/
+[SEE]:       https://sqlite.org/com/see.html
