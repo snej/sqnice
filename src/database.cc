@@ -581,15 +581,13 @@ namespace sqnice {
 
 
 #ifdef SQLITE_HAS_CODEC
-    //TODO: Support both key and password mode, for both SQLCipher and SEE.
-    /*  Unfortunately they behave differently, and there is no obvious way to detect which one is
-        present. (The best way might be to call `sqlite3_key(db, 0, NULL)` and see if an error is
-        returned; if so, it's SQLCipher.)
+    /*  SQLCipher and the SQLite Encryption Extenion [SEE] have the same C API, but its behavior
+        is different
 
         SQLCipher: 
         - the `key` string is treated as a password, unless it looks like a SQL hex blob the size
           of a key, i.e. starts with `x'` and ends with `'` and has 2*keySize hex digits between.
-        - An empty string is not allowed.
+        - An empty string is not allowed (returns SQLITE_ERROR.)
 
         SEE: 
         - The `key` string is treated as a raw key by default. If longer than the cipher key
@@ -597,32 +595,40 @@ namespace sqnice {
         - If the length (nKey) is _negative_, the string is treated as a password. It must be NUL
           terminated.
         - If the length is zero and `pKey` is NULL, it denotes "no encryption".
-    //
      */
+
+    // TODO: Add methods that take raw keys.
 
     const bool database::encryption_available = true;
 
-    static pair<const char*,int> keyParams(string_view password) {
-        if (password.empty())
-            return {nullptr, 0};
-        else
-            return {password.data(), int(password.size())};
+    status database::_use_password(std::string_view password, int (*fn)(sqlite3*,const void*,int)) {
+        // Test for SQLCipher by checking a pragma it implements but not SEE:
+        auto cv = string_pragma("cipher_version");
+        bool is_sqlcipher = !cv.empty();
+
+        auto h = check_handle();
+        int rc;
+        if (is_sqlcipher) {
+            rc = fn(h, password.data(), int(password.size()));
+        } else if (password.empty()) {
+            rc = fn(h, nullptr, 0);         // SEE: Empty password becomes NULL, meaning decrypt
+        } else {
+            string pwStr(password);
+            rc = fn(h, pwStr.c_str(), -1);  // SEE: Pass null-terminated string and -1
+            ::memset(pwStr.data(), 0, pwStr.size());
+        }
+        return check(rc);
     }
 
-    status database::use_password(std::string_view password) {
-        auto [pKey, nKey] = keyParams(password);
-        return check(sqlite3_key(check_handle(), pKey, nKey));
-    }
-
-    status database::rekey(std::string_view newPassword) {
-        auto [pKey, nKey] = keyParams(newPassword);
-        return check(sqlite3_rekey(check_handle(), pKey, nKey));
-    }
+    status database::use_password(std::string_view pw)   {return _use_password(pw, &sqlite3_key);}
+    status database::change_password(std::string_view pw){return _use_password(pw, &sqlite3_rekey);}
 
 #else
     const bool database::encryption_available = false;
-    status database::use_password(std::string_view password) {return check(status::error);}
-    status database::rekey(std::string_view newPassword)     {return check(status::error);}
+    status database::_use_password(std::string_view, int (*)(sqlite3*,const void*,int)) {
+        return status::error;}
+    status database::use_password(std::string_view password)        {return check(status::error);}
+    status database::change_password(std::string_view newPassword)  {return check(status::error);}
 #endif
 
 
