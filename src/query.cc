@@ -128,7 +128,7 @@ namespace sqnice {
             rc = status::error;
         } else if (rc == status::error && exceptions_) {
             // Throw a better exception:
-            throw invalid_argument(format("%s, in SQL statement \"%s\"",
+            throw invalid_argument(stringprintf("%s, in SQL statement \"%s\"",
                                           sqlite3_errmsg(db.get()), string(sql).c_str()));
         } else if (ok(rc)) {
             finish();
@@ -149,7 +149,7 @@ namespace sqnice {
         if (int idx = sqlite3_bind_parameter_index(any_stmt(), name); idx >= 1)
             return idx;
         else [[unlikely]]
-            throw invalid_argument(format("unknown binding name \"%s\" for: %s",
+            throw invalid_argument(stringprintf("unknown binding name \"%s\" for: %s",
                                           name, sqlite3_sql(any_stmt())));
     }
 
@@ -224,7 +224,7 @@ namespace sqnice {
 
     status statement::check_bind(int rc, int idx) {
         if (exceptions_ && rc == SQLITE_RANGE) [[unlikely]]
-            throw invalid_argument(format("parameter index %d out of range (max %d) for: %s",
+            throw invalid_argument(stringprintf("parameter index %d out of range (max %d) for: %s",
                                           idx, parameter_count(), sqlite3_sql(any_stmt())));
         else
             return check(rc);
@@ -244,7 +244,7 @@ namespace sqnice {
 
     status statement::bind_uint64(int idx, uint64_t value) {
         if (value > INT64_MAX) [[unlikely]]
-            throw domain_error(format("uint64_t value 0x%llux is too large for SQLite",
+            throw domain_error(stringprintf("uint64_t value 0x%llux is too large for SQLite",
                                       (unsigned long long)value));
         return bind_int64(idx, int64_t(value));
     }
@@ -284,7 +284,7 @@ namespace sqnice {
     statement::bindref statement::operator[] (char const *name) {
         auto idx = sqlite3_bind_parameter_index(stmt(), name);
         if (idx < 1 && exceptions_) [[unlikely]]
-            throw invalid_argument(format("unknown binding name \"%s\"", name));
+            throw invalid_argument(stringprintf("unknown binding name \"%s\"", name));
         return bindref(*this, idx);
     }
 
@@ -328,7 +328,7 @@ namespace sqnice {
 
     unsigned query::check_idx(unsigned idx) const {
         if (idx >= column_count()) [[unlikely]]
-            throw invalid_argument(format("invalid column index %u (max %u)",
+            throw invalid_argument(stringprintf("invalid column index %u (max %u)",
                                           idx, column_count()));
         return idx;
     }

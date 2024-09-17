@@ -86,7 +86,7 @@ namespace sqnice {
     static_assert(int(function_flags::innocuous)     == SQLITE_INNOCUOUS);
 
 
-    string format(const char* fmt, ...) {
+    string stringprintf(const char* fmt, ...) {
         va_list args;
         va_start(args, fmt);
         unique_ptr<char[],decltype(&sqlite3_free)> str(sqlite3_vmprintf(fmt, args), sqlite3_free);

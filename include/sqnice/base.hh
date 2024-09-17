@@ -45,6 +45,10 @@
 #  define __has_feature(F) 0
 #endif
 
+#ifndef __has_builtin
+#  define __has_builtin(B) 0
+#endif
+
 #if __has_feature(nullability)
 #  define ASSUME_NONNULL_BEGIN  _Pragma("clang assume_nonnull begin")
 #  define ASSUME_NONNULL_END    _Pragma("clang assume_nonnull end")
@@ -159,7 +163,7 @@ namespace sqnice {
 
     
     /// Utility function that's like `sprintf` but returns a `std::string`.
-    std::string format(const char* fmt, ...) sqnice_printflike(1,2);
+    std::string stringprintf(const char* fmt, ...) sqnice_printflike(1,2);
 }
 
 ASSUME_NONNULL_END
