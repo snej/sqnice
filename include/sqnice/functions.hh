@@ -31,6 +31,7 @@
 #include "sqnice/query.hh"
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <tuple>

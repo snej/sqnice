@@ -28,6 +28,7 @@
 #define SQNICE_BLOB_STREAM_H
 
 #include "sqnice/base.hh"
+#include <cstdint>
 
 ASSUME_NONNULL_BEGIN
 

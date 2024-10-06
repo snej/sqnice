@@ -28,6 +28,7 @@
 #define SQNICE_DATABASE_H
 
 #include "sqnice/base.hh"
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <span>

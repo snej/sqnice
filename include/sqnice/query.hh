@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <cassert>
@@ -439,9 +440,9 @@ namespace sqnice {
     /** Specializing the struct `sqnice::column_helper<T>` and adding a static method
         `get(row&, unsigned idx) -> T` allows a query column value to be converted to type T. */
     template <typename T> struct column_helper{ };
-    template <typename T>
 
     /** The concept `columnable` identifies custom types column values can be converted to. */
+    template <typename T>
     concept columnable = requires(column_value const& col) {
         {column_helper<T>::get(col)} -> std::same_as<T>;
     };
