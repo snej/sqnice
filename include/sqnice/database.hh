@@ -189,7 +189,7 @@ namespace sqnice {
         [[nodiscard]] sqlite3* handle() const noexcept      {return db_.get();}
 
         /// Like `handle`, but throws an exception instead of returning `nullptr`.
-        /// @throws std::logic_error
+        /// @throws std::logic_error  if the handle is empty.
         sqlite3* check_handle() const;
 
 

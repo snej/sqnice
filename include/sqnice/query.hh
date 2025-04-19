@@ -159,8 +159,8 @@ namespace sqnice {
         /// Returns the (1-based) index of a named parameter, or 0 if none exists.
         int parameter_index(const char* name) const noexcept;
 
-        /// Returns the (1-based) index of a named parameter, or throws if none exists.
-        /// @throws std::invalid_argument
+        /// Returns the (1-based) index of a named parameter.
+        /// @throws std::invalid_argument  if there is no such parameter.
         int check_parameter_index(const char* name) const;
 
         // The following methods bind values to numbered parameters (`?` params start at 1)
