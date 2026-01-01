@@ -112,8 +112,8 @@ namespace sqnice {
         noncopyable() = default;
         ~noncopyable() = default;
 
-        noncopyable(noncopyable&&) = default;
-        noncopyable& operator=(noncopyable&&) = default;
+        noncopyable(noncopyable&&) noexcept = default;
+        noncopyable& operator=(noncopyable&&) noexcept = default;
 
         noncopyable(noncopyable const&) = delete;
         noncopyable& operator=(noncopyable const&) = delete;
