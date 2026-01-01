@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.9)
+cmake_minimum_required(VERSION 3.10)
 
 project( sqnice
     VERSION     0.1.0
@@ -126,4 +126,3 @@ add_executable( sqnice_tests
 target_link_libraries( sqnice_tests
     sqnice
 )
-
